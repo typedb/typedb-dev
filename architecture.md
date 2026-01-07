@@ -22,6 +22,11 @@ typedb-dev/
     ├── typedb-console/      # CLI client
     ├── typedb-studio/       # GUI application
     │
+    │ # Private repositories (commercial)
+    ├── typedb-cluster/      # Clustered/distributed TypeDB
+    ├── typedb-cloud/        # Cloud platform management
+    ├── typedb-cloud-infrastructure/  # Cloud infra configs
+    │
     │ # Secondary repositories (supporting)
     ├── dependencies/        # Shared Bazel config
     ├── bazel-distribution/  # Deployment rules
@@ -52,7 +57,18 @@ typedb-dev/
         ▼                    ▼                  ▼
 ┌──────────────┐        ┌──────────┐    ┌──────────────┐
 │ typedb-driver│        │  typedb  │    │typedb-console│
-└──────────────┘        └──────────┘    └──────────────┘
+└──────┬───────┘        └────┬─────┘    └──────────────┘
+       │                     │
+       │                     ▼
+       │              ┌──────────────┐
+       │              │typedb-cluster│
+       │              └──────────────┘
+       │
+       ▼
+┌─────────────────────────────────────────┐
+│ typedb-cloud (updated infrequently)     │
+│   └─► typedb-cloud-infrastructure       │
+└─────────────────────────────────────────┘
 ```
 
 ### Dependency Details
@@ -66,6 +82,9 @@ typedb-dev/
 | `typedb-protocol` | dependencies |
 | `typedb-behaviour` | dependencies |
 | `typedb-studio` | dependencies |
+| `typedb-cluster` | dependencies, bazel-distribution, typedb |
+| `typedb-cloud` | dependencies, typedb-driver (Maven), typeql (Maven), typedb-cloud-infrastructure |
+| `typedb-cloud-infrastructure` | (standalone infrastructure configs) |
 
 ## Git Configuration
 

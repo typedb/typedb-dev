@@ -50,6 +50,16 @@ Before considering a change complete:
 - [ ] Would a reviewer unfamiliar with the change understand it easily?
 - [ ] Have cross-repository impacts been identified and flagged?
 
+### Meta-Repository Portability
+
+When modifying this `typedb-dev` repository itself (scripts, tooling, configuration):
+
+- **Cross-platform**: All scripts and tools must work on both **Linux** and **macOS**
+- **Location-agnostic**: Never hardcode absolute paths. Anyone should be able to clone this repository to any location and have it work immediately
+- **Self-contained**: Use paths relative to the repository root (e.g., `$SCRIPT_DIR`, `$(dirname "$0")`)
+- **Standard tools**: Prefer POSIX-compatible shell constructs; avoid bash-specific features where possible
+- **No environment assumptions**: Don't assume specific environment variables are set (except standard ones like `$HOME`)
+
 ## Quick Start
 
 ```bash
@@ -113,6 +123,14 @@ tool/repo reset typedb typeql
 | `typedb-console` | Interactive CLI client |
 | `typedb-studio` | GUI desktop application |
 
+### Private (Commercial)
+
+| Repository | Description |
+|------------|-------------|
+| `typedb-cluster` | Clustered/distributed TypeDB (Rust) |
+| `typedb-cloud` | Cloud platform management (Kotlin) |
+| `typedb-cloud-infrastructure` | Cloud infrastructure configs (Terraform/K8s) |
+
 ### Secondary (Supporting)
 
 | Repository | Description |
@@ -144,8 +162,10 @@ When changes span repos, merge PRs in this order:
 3. `typeql` (parser changes)
 4. `typedb-protocol` (protocol changes)
 5. `typedb` (server changes)
-6. `typedb-driver` (driver changes)
-7. `typedb-console` / `typedb-studio` (client changes)
+6. `typedb-cluster` (cluster server, depends on typedb)
+7. `typedb-driver` (driver changes)
+8. `typedb-console` / `typedb-studio` (client changes)
+9. `typedb-cloud` (cloud platform, updated infrequently, depends on driver)
 
 ## Git Configuration
 
@@ -228,6 +248,8 @@ The relative path `../typeql` works because it's relative to the WORKSPACE root 
 | `typedb-driver` | `typedb_behaviour` | `../typedb-behaviour` |
 | `typedb-console` | `typeql` | `../typeql` |
 | `typedb-console` | `typedb_driver` | `../typedb-driver` |
+| `typedb-cluster` | `typedb` | `../typedb` |
+| `typedb-cluster` | `typedb_dependencies` | `../dependencies` |
 
 ## Build Commands
 
@@ -313,6 +335,21 @@ max_width = 120
 imports_granularity = "Crate"
 group_imports = "StdExternalCrate"
 ```
+
+**Running rustfmt via Bazel:**
+```bash
+# Format all Rust files in a repository
+bazel run @rules_rust//:rustfmt --@rules_rust//:rustfmt.toml=//:rustfmt.toml
+
+# For repositories with rustfmt.toml in a /rust subdirectory
+bazel run @rules_rust//:rustfmt --@rules_rust//:rustfmt.toml=//rust:rustfmt.toml
+```
+
+Common rustfmt.toml locations:
+- `typedb`: `//:rustfmt.toml`
+- `typeql`: `//rust:rustfmt.toml`
+- `typedb-driver`: `//rust:rustfmt.toml`
+- `typedb-console`: `//:rustfmt.toml`
 
 **Naming:**
 | Category | Convention | Examples |
