@@ -101,6 +101,54 @@ get_modified_count() {
   git -C "$REPOS_DIR/$repo" status --porcelain 2>/dev/null | wc -l | tr -d ' '
 }
 
+# Command: init
+# Initialize submodules and configure remotes
+cmd_init() {
+  local repos=("$@")
+
+  echo "Initializing TypeDB development environment"
+  echo ""
+
+  # If no repos specified, init all
+  if [ ${#repos[@]} -eq 0 ]; then
+    echo "Initializing all submodules..."
+    git -C "$ROOT_DIR" submodule update --init
+    echo ""
+    repos=("${ALL_REPOS[@]}")
+  else
+    echo "Initializing specified submodules..."
+    for repo in "${repos[@]}"; do
+      git -C "$ROOT_DIR" submodule update --init "repositories/$repo" 2>/dev/null || true
+    done
+    echo ""
+  fi
+
+  echo "Configuring remotes (origin -> typedb)..."
+  echo ""
+
+  for repo in "${repos[@]}"; do
+    local repo_path="$REPOS_DIR/$repo"
+
+    if [ ! -d "$repo_path" ] || { [ ! -d "$repo_path/.git" ] && [ ! -f "$repo_path/.git" ]; }; then
+      color "$YELLOW" "  - $repo - not initialized (may not have access)"
+      continue
+    fi
+
+    # Check if 'typedb' remote already exists
+    if git -C "$repo_path" remote get-url "$REMOTE_NAME" &>/dev/null; then
+      color "$BLUE" "  ● $repo - remote '$REMOTE_NAME' already configured"
+    elif git -C "$repo_path" remote get-url origin &>/dev/null; then
+      git -C "$repo_path" remote rename origin "$REMOTE_NAME" 2>/dev/null
+      color "$GREEN" "  ✓ $repo - renamed origin to $REMOTE_NAME"
+    else
+      color "$YELLOW" "  - $repo - no remote to configure"
+    fi
+  done
+
+  echo ""
+  echo "Done. Run 'tool/repo status' to verify."
+}
+
 # Command: checkout
 # Create/checkout feature branch across repos
 cmd_checkout() {
@@ -352,6 +400,7 @@ TypeDB Multi-Repo Tool
 Usage: repo <command> [options]
 
 Commands:
+  init [repo1] [repo2...]                 Initialize submodules and configure remotes
   checkout <feature> <repo1> [repo2...]   Create/checkout feature branch
   switch <feature> <repo1> [repo2...]     Switch to existing feature branch
   status [--feature <name>]               Show status of all repos
@@ -360,6 +409,8 @@ Commands:
   list                                    List all available repos
 
 Examples:
+  repo init                               # Initialize all submodules
+  repo init typedb typeql                 # Initialize specific repos only
   repo checkout new-feature typedb typeql typedb-driver
   repo switch existing-feature typedb typeql
   repo status --feature new-feature
@@ -380,6 +431,9 @@ main() {
   shift
 
   case "$cmd" in
+    init)
+      cmd_init "$@"
+      ;;
     checkout)
       if [ $# -lt 2 ]; then
         echo "Error: checkout requires feature name and at least one repo"

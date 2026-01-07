@@ -63,6 +63,9 @@ When modifying this `typedb-dev` repository itself (scripts, tooling, configurat
 ## Quick Start
 
 ```bash
+# Initialize submodules and configure remotes (first time setup)
+tool/repo init
+
 # Check status of all repositories
 tool/repo status
 
@@ -81,12 +84,13 @@ tool/repo fetch
 
 ## Repository Tool
 
-The `tool/repo` script manages branches across submodules.
+The `tool/repo` script manages submodules and branches.
 
 ### Commands
 
 | Command | Description |
 |---------|-------------|
+| `init [repos...]` | Initialize submodules and configure remotes |
 | `checkout <feature> <repos...>` | Create/checkout feature branch in specified repos |
 | `switch <feature> <repos...>` | Switch to existing feature branch (fetches from remote if needed) |
 | `status [--feature <name>]` | Show status of all repos |

@@ -5,12 +5,15 @@ This repository orchestrates development across all TypeDB repositories using gi
 ## Setup
 
 ```bash
-# Clone with submodules
-git clone --recursive git@github.com:typedb/typedb-dev.git
+# Clone the repository
+git clone git@github.com:typedb/typedb-dev.git
 cd typedb-dev
 
-# Or if already cloned, initialize submodules
-git submodule update --init
+# Initialize submodules and configure remotes
+tool/repo init
+
+# Or initialize only specific repos (e.g., if you don't have access to private repos)
+tool/repo init typedb typeql typedb-driver
 ```
 
 ## Quick Start
@@ -58,10 +61,11 @@ typedb-dev/
 
 ## Repository Tool
 
-The `tool/repo` script manages branches across submodules.
+The `tool/repo` script manages submodules and branches.
 
 | Command | Description |
 |---------|-------------|
+| `init [repos...]` | Initialize submodules and configure remotes |
 | `checkout <feature> <repos...>` | Create/checkout feature branch in specified repos |
 | `switch <feature> <repos...>` | Switch to existing feature branch (fetches from remote) |
 | `status [--feature <name>]` | Show status of all repos |
