@@ -231,7 +231,15 @@ The relative path `../typeql` works because it's relative to the WORKSPACE root 
 
 ## Build Commands
 
-See individual repository READMEs for build instructions. Common patterns:
+**Installing Bazel:**
+
+All repositories use Bazel via Bazelisk (version manager). Install with:
+```bash
+npm install -g @bazel/bazelisk
+```
+Or see https://github.com/bazelbuild/bazelisk for other installation methods.
+
+**Common patterns:**
 
 ```bash
 # TypeDB server
