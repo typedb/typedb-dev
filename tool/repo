@@ -1,0 +1,428 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# TypeDB Multi-Repo Orchestration Tool
+# Human-readable output for branch management across submodules
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPOS_DIR="$ROOT_DIR/repositories"
+REMOTE_NAME="typedb"
+
+# All known submodules
+ALL_REPOS=(
+  typedb
+  typedb-driver
+  typeql
+  typedb-protocol
+  typedb-console
+  typedb-studio
+  typedb-cluster
+  typedb-cloud
+  typedb-cloud-infrastructure
+  dependencies
+  bazel-distribution
+  typedb-behaviour
+  typedb-docs
+  typedb-examples
+  typedb-web
+)
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Check if we're in a TTY for color support
+if [ -t 1 ]; then
+  USE_COLOR=true
+else
+  USE_COLOR=false
+fi
+
+color() {
+  if [ "$USE_COLOR" = true ]; then
+    echo -e "$1$2${NC}"
+  else
+    echo "$2"
+  fi
+}
+
+# Validate repo exists as submodule
+validate_repo() {
+  local repo="$1"
+  local repo_path="$REPOS_DIR/$repo"
+  if [ ! -d "$repo_path/.git" ] && [ ! -f "$repo_path/.git" ]; then
+    return 1
+  fi
+  return 0
+}
+
+# Get current branch of a repo
+get_branch() {
+  local repo="$1"
+  git -C "$REPOS_DIR/$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "HEAD"
+}
+
+# Check if repo has uncommitted changes
+is_clean() {
+  local repo="$1"
+  if git -C "$REPOS_DIR/$repo" diff --quiet 2>/dev/null && git -C "$REPOS_DIR/$repo" diff --cached --quiet 2>/dev/null; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+# Get ahead/behind counts
+get_ahead_behind() {
+  local repo="$1"
+  local branch
+  branch=$(get_branch "$repo")
+  if [ "$branch" = "HEAD" ]; then
+    echo "0 0"
+    return
+  fi
+  local upstream="$REMOTE_NAME/$branch"
+  if ! git -C "$REPOS_DIR/$repo" rev-parse "$upstream" &>/dev/null; then
+    echo "0 0"
+    return
+  fi
+  local counts
+  counts=$(git -C "$REPOS_DIR/$repo" rev-list --left-right --count "$branch...$upstream" 2>/dev/null || echo "0 0")
+  echo "$counts"
+}
+
+# Get modified file count
+get_modified_count() {
+  local repo="$1"
+  git -C "$REPOS_DIR/$repo" status --porcelain 2>/dev/null | wc -l | tr -d ' '
+}
+
+# Command: checkout
+# Create/checkout feature branch across repos
+cmd_checkout() {
+  local feature="$1"
+  shift
+  local repos=("$@")
+
+  if [ ${#repos[@]} -eq 0 ]; then
+    echo "Error: No repos specified"
+    echo "Usage: repo checkout <feature> <repo1> [repo2...]"
+    exit 1
+  fi
+
+  echo "Checking out feature branch: $feature"
+  echo ""
+
+  for repo in "${repos[@]}"; do
+    if ! validate_repo "$repo"; then
+      color "$RED" "  ✗ $repo - not a valid submodule"
+      continue
+    fi
+
+    local repo_path="$REPOS_DIR/$repo"
+    local current_branch
+    current_branch=$(get_branch "$repo")
+
+    if [ "$current_branch" = "$feature" ]; then
+      color "$BLUE" "  ● $repo - already on $feature"
+    elif git -C "$repo_path" show-ref --verify --quiet "refs/heads/$feature" 2>/dev/null; then
+      git -C "$repo_path" checkout "$feature" &>/dev/null
+      color "$GREEN" "  ✓ $repo - switched to $feature"
+    else
+      git -C "$repo_path" checkout -b "$feature" &>/dev/null
+      color "$GREEN" "  ✓ $repo - created and switched to $feature"
+    fi
+  done
+
+  echo ""
+  echo "Done."
+}
+
+# Command: switch
+# Switch repos to existing feature branch (fetches from remote if needed)
+cmd_switch() {
+  local feature="$1"
+  shift
+  local repos=("$@")
+
+  if [ ${#repos[@]} -eq 0 ]; then
+    echo "Error: No repos specified"
+    echo "Usage: repo switch <feature> <repo1> [repo2...]"
+    exit 1
+  fi
+
+  echo "Switching to feature branch: $feature"
+  echo ""
+
+  for repo in "${repos[@]}"; do
+    if ! validate_repo "$repo"; then
+      color "$RED" "  ✗ $repo - not a valid submodule"
+      continue
+    fi
+
+    local repo_path="$REPOS_DIR/$repo"
+    local current_branch
+    current_branch=$(get_branch "$repo")
+
+    if [ "$current_branch" = "$feature" ]; then
+      color "$BLUE" "  ● $repo - already on $feature"
+    elif git -C "$repo_path" show-ref --verify --quiet "refs/heads/$feature" 2>/dev/null; then
+      git -C "$repo_path" checkout "$feature" &>/dev/null
+      color "$GREEN" "  ✓ $repo - switched to $feature"
+    else
+      # Try to fetch and checkout from remote
+      if git -C "$repo_path" fetch "$REMOTE_NAME" "$feature" &>/dev/null 2>&1 && \
+         git -C "$repo_path" checkout -b "$feature" "$REMOTE_NAME/$feature" &>/dev/null 2>&1; then
+        color "$GREEN" "  ✓ $repo - fetched and switched to $feature"
+      else
+        color "$RED" "  ✗ $repo - branch '$feature' not found"
+      fi
+    fi
+  done
+
+  echo ""
+  echo "Done."
+}
+
+# Command: status
+# Show status of all repos
+cmd_status() {
+  local filter_feature=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --feature)
+        filter_feature="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  if [ -n "$filter_feature" ]; then
+    echo "Status for feature: $filter_feature"
+  else
+    echo "Repository Status"
+  fi
+  echo "================="
+  echo ""
+
+  printf "%-20s %-20s %-8s %-12s\n" "REPO" "BRANCH" "CLEAN" "AHEAD/BEHIND"
+  printf "%-20s %-20s %-8s %-12s\n" "----" "------" "-----" "------------"
+
+  for repo in "${ALL_REPOS[@]}"; do
+    if ! validate_repo "$repo"; then
+      continue
+    fi
+
+    local branch
+    branch=$(get_branch "$repo")
+
+    # If filtering by feature, skip repos not on that branch or master
+    if [ -n "$filter_feature" ]; then
+      if [ "$branch" != "$filter_feature" ] && [ "$branch" != "master" ]; then
+        continue
+      fi
+    fi
+
+    local clean_status
+    if is_clean "$repo"; then
+      clean_status="yes"
+    else
+      local modified
+      modified=$(get_modified_count "$repo")
+      clean_status="${modified}m"
+    fi
+
+    local ahead_behind
+    ahead_behind=$(get_ahead_behind "$repo")
+    local ahead behind
+    ahead=$(echo "$ahead_behind" | awk '{print $1}')
+    behind=$(echo "$ahead_behind" | awk '{print $2}')
+    local sync_status="-"
+    if [ "$ahead" != "0" ] || [ "$behind" != "0" ]; then
+      sync_status="+${ahead}/-${behind}"
+    fi
+
+    # Color the branch based on whether it matches feature or is master
+    local branch_display="$branch"
+    if [ -n "$filter_feature" ] && [ "$branch" = "$filter_feature" ]; then
+      branch_display=$(color "$GREEN" "$branch")
+    elif [ "$branch" = "master" ]; then
+      branch_display=$(color "$BLUE" "$branch")
+    else
+      branch_display=$(color "$YELLOW" "$branch")
+    fi
+
+    printf "%-20s %-20s %-8s %-12s\n" "$repo" "$branch" "$clean_status" "$sync_status"
+  done
+
+  echo ""
+}
+
+# Command: reset
+# Reset repos back to master
+cmd_reset() {
+  local repos=("$@")
+
+  if [ ${#repos[@]} -eq 0 ]; then
+    echo "Error: No repos specified"
+    echo "Usage: repo reset <repo1> [repo2...]"
+    exit 1
+  fi
+
+  echo "Resetting to master branch"
+  echo ""
+
+  for repo in "${repos[@]}"; do
+    if ! validate_repo "$repo"; then
+      color "$RED" "  ✗ $repo - not a valid submodule"
+      continue
+    fi
+
+    local repo_path="$REPOS_DIR/$repo"
+    local current_branch
+    current_branch=$(get_branch "$repo")
+
+    if [ "$current_branch" = "master" ]; then
+      color "$BLUE" "  ● $repo - already on master"
+    else
+      git -C "$repo_path" checkout master &>/dev/null
+      color "$GREEN" "  ✓ $repo - reset to master (was: $current_branch)"
+    fi
+  done
+
+  echo ""
+  echo "Done."
+}
+
+# Command: fetch
+# Fetch latest from remote for specified repos
+cmd_fetch() {
+  local repos=("$@")
+
+  if [ ${#repos[@]} -eq 0 ]; then
+    repos=("${ALL_REPOS[@]}")
+  fi
+
+  echo "Fetching from remote: $REMOTE_NAME"
+  echo ""
+
+  for repo in "${repos[@]}"; do
+    if ! validate_repo "$repo"; then
+      color "$RED" "  ✗ $repo - not a valid submodule"
+      continue
+    fi
+
+    if git -C "$REPOS_DIR/$repo" fetch "$REMOTE_NAME" &>/dev/null; then
+      color "$GREEN" "  ✓ $repo"
+    else
+      color "$RED" "  ✗ $repo - fetch failed"
+    fi
+  done
+
+  echo ""
+  echo "Done."
+}
+
+# Command: list
+# List all repos
+cmd_list() {
+  echo "Primary Repositories:"
+  echo "  typedb typedb-driver typeql typedb-protocol typedb-console typedb-studio"
+  echo ""
+  echo "Private Repositories:"
+  echo "  typedb-cluster typedb-cloud typedb-cloud-infrastructure"
+  echo ""
+  echo "Secondary Repositories:"
+  echo "  dependencies bazel-distribution typedb-behaviour typedb-docs typedb-examples typedb-web"
+}
+
+# Show help
+show_help() {
+  cat << 'EOF'
+TypeDB Multi-Repo Tool
+
+Usage: repo <command> [options]
+
+Commands:
+  checkout <feature> <repo1> [repo2...]   Create/checkout feature branch
+  switch <feature> <repo1> [repo2...]     Switch to existing feature branch
+  status [--feature <name>]               Show status of all repos
+  reset <repo1> [repo2...]                Reset repos to master
+  fetch [repo1] [repo2...]                Fetch from remote (all if none specified)
+  list                                    List all available repos
+
+Examples:
+  repo checkout new-feature typedb typeql typedb-driver
+  repo switch existing-feature typedb typeql
+  repo status --feature new-feature
+  repo reset typedb typeql typedb-driver
+  repo fetch
+  repo list
+EOF
+}
+
+# Main command dispatch
+main() {
+  if [ $# -eq 0 ]; then
+    show_help
+    exit 0
+  fi
+
+  local cmd="$1"
+  shift
+
+  case "$cmd" in
+    checkout)
+      if [ $# -lt 2 ]; then
+        echo "Error: checkout requires feature name and at least one repo"
+        echo "Usage: repo checkout <feature> <repo1> [repo2...]"
+        exit 1
+      fi
+      cmd_checkout "$@"
+      ;;
+    switch)
+      if [ $# -lt 2 ]; then
+        echo "Error: switch requires feature name and at least one repo"
+        echo "Usage: repo switch <feature> <repo1> [repo2...]"
+        exit 1
+      fi
+      cmd_switch "$@"
+      ;;
+    status)
+      cmd_status "$@"
+      ;;
+    reset)
+      if [ $# -lt 1 ]; then
+        echo "Error: reset requires at least one repo"
+        echo "Usage: repo reset <repo1> [repo2...]"
+        exit 1
+      fi
+      cmd_reset "$@"
+      ;;
+    fetch)
+      cmd_fetch "$@"
+      ;;
+    list)
+      cmd_list
+      ;;
+    help|--help|-h)
+      show_help
+      ;;
+    *)
+      echo "Error: Unknown command: $cmd"
+      echo ""
+      show_help
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
