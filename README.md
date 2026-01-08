@@ -69,9 +69,12 @@ The `tool/repo` script manages submodules and branches.
 | `checkout <feature> <repos...>` | Create/checkout feature branch in specified repos |
 | `switch <feature> <repos...>` | Switch to existing feature branch (fetches from remote) |
 | `status [--feature <name>]` | Show status of all repos |
+| `commit <feature> "<message>"` | Commit changes in all repos on the feature branch |
 | `reset <repos...>` | Reset repos back to master |
 | `fetch [repos...]` | Fetch from remote (all repos if none specified) |
 | `list` | List all available repos |
+
+**Note:** The `commit` command only commits to submodule repositories. The meta-repository should be committed manually.
 
 ## Dependency Graph
 

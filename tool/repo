@@ -379,6 +379,74 @@ cmd_fetch() {
   echo "Done."
 }
 
+# Command: commit
+# Commit changes across all repos on a feature branch
+cmd_commit() {
+  if [ $# -lt 2 ]; then
+    echo "Error: commit requires feature name and commit message"
+    echo "Usage: repo commit <feature> \"<message>\""
+    exit 1
+  fi
+
+  local feature="$1"
+  shift
+  local message="$*"
+
+  if [ "$feature" = "master" ]; then
+    echo "Error: Cannot use 'master' as feature name for batch commits"
+    echo "Commit to master branches individually in each repository"
+    exit 1
+  fi
+
+  echo "Committing to feature branch: $feature"
+  echo "Message: $message"
+  echo ""
+
+  local committed=0
+  local skipped=0
+
+  for repo in "${ALL_REPOS[@]}"; do
+    if ! validate_repo "$repo"; then
+      continue
+    fi
+
+    local repo_path="$REPOS_DIR/$repo"
+    local branch
+    branch=$(get_branch "$repo")
+
+    # Skip repos not on the feature branch
+    if [ "$branch" != "$feature" ]; then
+      continue
+    fi
+
+    # Check if repo has changes
+    if is_clean "$repo"; then
+      color "$BLUE" "  ● $repo - no changes to commit"
+      ((skipped++))
+      continue
+    fi
+
+    # Stage all changes and commit
+    local modified
+    modified=$(get_modified_count "$repo")
+
+    if git -C "$repo_path" add -A && git -C "$repo_path" commit -m "$message" &>/dev/null; then
+      color "$GREEN" "  ✓ $repo - committed ($modified files)"
+      ((committed++))
+    else
+      color "$RED" "  ✗ $repo - commit failed"
+    fi
+  done
+
+  echo ""
+  if [ $committed -eq 0 ] && [ $skipped -eq 0 ]; then
+    echo "No repositories found on branch '$feature'"
+    echo "Use 'tool/repo checkout $feature <repos...>' first"
+  else
+    echo "Done. Committed: $committed, Skipped (clean): $skipped"
+  fi
+}
+
 # Command: list
 # List all repos
 cmd_list() {
@@ -404,6 +472,7 @@ Commands:
   checkout <feature> <repo1> [repo2...]   Create/checkout feature branch
   switch <feature> <repo1> [repo2...]     Switch to existing feature branch
   status [--feature <name>]               Show status of all repos
+  commit <feature> "<message>"            Commit changes in all repos on feature branch
   reset <repo1> [repo2...]                Reset repos to master
   fetch [repo1] [repo2...]                Fetch from remote (all if none specified)
   list                                    List all available repos
@@ -414,6 +483,7 @@ Examples:
   repo checkout new-feature typedb typeql typedb-driver
   repo switch existing-feature typedb typeql
   repo status --feature new-feature
+  repo commit new-feature "Add new query type support"
   repo reset typedb typeql typedb-driver
   repo fetch
   repo list
@@ -452,6 +522,9 @@ main() {
       ;;
     status)
       cmd_status "$@"
+      ;;
+    commit)
+      cmd_commit "$@"
       ;;
     reset)
       if [ $# -lt 1 ]; then
