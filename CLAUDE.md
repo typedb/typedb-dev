@@ -182,6 +182,26 @@ When changes span repos, merge PRs in this order:
 - **Remote name**: `typedb` (not `origin`)
 - **URLs**: SSH format (`git@github.com:typedb/<repo>.git`)
 - **Default branch**: `master`
+- **Branch base**: Feature branches fork from `typedb/master`. When looking for diffs, use `typedb/master` as the base (e.g., `git diff typedb/master...HEAD`), or find the nearest ancestor branch if the feature branch is based on another branch.
+
+### Pushing Changes
+
+**Always push to your fork remote, never directly to `typedb`.**
+
+1. Add your fork as a remote (e.g., `git remote add <username> git@github.com:<username>/<repo>.git`)
+2. Push feature branches to your fork: `git push <username> <branch-name>`
+3. Create PRs from your fork to the `typedb` remote
+
+Use `tool/repo push <fork-remote> <feature>` to push all repos on a feature branch and get PR links.
+
+### Base Branches
+
+Each repository should specify its base branch in its `CLAUDE.md` file. If a repo's `CLAUDE.md` doesn't specify a base branch, flag this to the user so it can be updated.
+
+| Repository | Base Branch |
+|------------|-------------|
+| Most repos | `master` |
+| `typedb-docs` | `3.x-development` |
 
 ### Merge Strategy
 
