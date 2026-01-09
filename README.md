@@ -46,9 +46,13 @@ tool/repo fetch
 
 ```
 typedb-dev/
-├── tool/repo              # Multi-repo management script
-├── CLAUDE.md              # AI agent instructions
-├── architecture.md        # Technical documentation
+├── tool/
+│   ├── repo                    # Multi-repo management script
+│   └── setup-docker-sandbox    # Docker sandbox for Claude Code
+├── .claude/
+│   └── commands/               # Custom slash commands
+├── CLAUDE.md                   # AI agent instructions
+├── architecture.md             # Technical documentation
 │
 └── repositories/
     ├── typedb/            # Core database server (Rust)
@@ -83,6 +87,36 @@ The `tool/repo` script manages submodules and branches.
 | `list` | List all available repos |
 
 **Note:** The `commit` and `push` commands only operate on submodule repositories. The meta-repository should be committed/pushed manually.
+
+## Sandboxed Development
+
+For isolated development where Claude Code can operate with full permissions, use the Docker sandbox:
+
+```bash
+# Create a Docker sandbox
+tool/setup-docker-sandbox myproject ghp_xxxx --shared-dir /path/to/project
+
+# Attach to existing sandbox
+tool/setup-docker-sandbox myproject --attach
+
+# List running sandboxes
+tool/setup-docker-sandbox --list
+
+# Remove a sandbox
+tool/setup-docker-sandbox myproject --remove
+```
+
+The Docker sandbox:
+- Creates an isolated Ubuntu container
+- Mounts only the specified project directory
+- Runs as a non-root user
+- Installs Claude Code automatically
+
+**Security:** Requires a **fine-grained GitHub token** with minimal permissions:
+- Limited to only necessary repositories
+- Read/Write Contents and Pull Requests only
+- Short expiration (7-30 days recommended)
+- [Create pre-configured token](https://github.com/settings/personal-access-tokens/new?name=claude-sandbox-token&description=Claude%20Code%20sandbox%20token&expires=30&contents=write)
 
 ## Dependency Graph
 

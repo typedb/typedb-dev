@@ -1,0 +1,362 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Setup a Docker-based sandboxed Claude Code development environment
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+color() {
+  if [ -t 1 ]; then
+    echo -e "$1$2${NC}"
+  else
+    echo "$2"
+  fi
+}
+
+show_help() {
+  cat << 'EOF'
+Setup Docker-based Claude Code Sandbox
+
+Creates an isolated Docker container where Claude Code can operate with
+full permissions. The container runs as a non-root user with access only
+to the mounted project directory.
+
+Usage: setup-docker-sandbox <project-name> <github-token> --shared-dir <path>
+
+Arguments:
+  project-name           Name for the sandbox (used in container name)
+  github-token           GitHub token for authentication (MUST be fine-grained!)
+  --shared-dir <path>    Directory to mount in the container
+
+Options:
+  --remove               Remove an existing sandbox
+  --list                 List running sandboxes
+  --attach               Attach to existing sandbox
+  --help                 Show this help
+
+Examples:
+  setup-docker-sandbox myfeature ghp_xxxx --shared-dir /path/to/project
+  setup-docker-sandbox myfeature --attach
+  setup-docker-sandbox myfeature --remove
+  setup-docker-sandbox --list
+
+Security Model:
+  - Container runs isolated from host system
+  - Only specified project directory is mounted
+  - Non-root user inside container
+  - GitHub token should be fine-grained with minimal permissions
+
+EOF
+}
+
+TOKEN_URL="https://github.com/settings/personal-access-tokens/new?name=claude-sandbox-token&description=Claude%20Code%20sandbox%20token&expires=30&contents=write"
+
+show_token_link() {
+  echo ""
+  echo "Generate a fine-grained GitHub token at:"
+  color "$BLUE" "  $TOKEN_URL"
+  echo ""
+}
+
+show_token_warning() {
+  echo ""
+  color "$RED" "╔══════════════════════════════════════════════════════════════════════════════╗"
+  color "$RED" "║                                                                              ║"
+  color "$RED" "║  ${BOLD}⚠️  CRITICAL SECURITY WARNING ⚠️${NC}${RED}                                            ║"
+  color "$RED" "║                                                                              ║"
+  color "$RED" "║  You are about to provide a GitHub token to a sandboxed environment.        ║"
+  color "$RED" "║                                                                              ║"
+  color "$RED" "║  ${BOLD}ONLY USE FINE-GRAINED PERSONAL ACCESS TOKENS${NC}${RED} with:                        ║"
+  color "$RED" "║                                                                              ║"
+  color "$RED" "║    ✗ NO access to other repositories                                        ║"
+  color "$RED" "║    ✗ NO admin or delete permissions                                         ║"
+  color "$RED" "║    ✗ NO workflow permissions (unless required)                              ║"
+  color "$RED" "║    ✓ Limited to ONLY the repositories you need                              ║"
+  color "$RED" "║    ✓ Read/Write Contents (for commits)                                      ║"
+  color "$RED" "║    ✓ Read/Write Pull Requests (for PRs)                                     ║"
+  color "$RED" "║    ✓ Short expiration time (7-30 days recommended)                          ║"
+  color "$RED" "║                                                                              ║"
+  color "$RED" "║  ${BOLD}NEVER use classic tokens or tokens with broad repository access!${NC}${RED}          ║"
+  color "$RED" "║                                                                              ║"
+  color "$RED" "╚══════════════════════════════════════════════════════════════════════════════╝"
+  echo ""
+}
+
+list_sandboxes() {
+  echo "Running Claude sandboxes:"
+  echo ""
+
+  local containers
+  containers=$(docker ps --filter "name=claude-sandbox-" --format "{{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || true)
+
+  if [ -z "$containers" ]; then
+    echo "  (none running)"
+  else
+    printf "  %-30s %-25s %s\n" "NAME" "STATUS" "PORTS"
+    printf "  %-30s %-25s %s\n" "----" "------" "-----"
+    while IFS=$'\t' read -r name status ports; do
+      printf "  %-30s %-25s %s\n" "$name" "$status" "$ports"
+    done <<< "$containers"
+  fi
+
+  echo ""
+  echo "Stopped sandboxes:"
+  local stopped
+  stopped=$(docker ps -a --filter "name=claude-sandbox-" --filter "status=exited" --format "{{.Names}}" 2>/dev/null || true)
+
+  if [ -z "$stopped" ]; then
+    echo "  (none)"
+  else
+    echo "$stopped" | sed 's/^/  /'
+  fi
+  echo ""
+}
+
+remove_sandbox() {
+  local project="$1"
+  local container_name="claude-sandbox-$project"
+
+  if ! docker ps -a --format "{{.Names}}" | grep -q "^${container_name}$"; then
+    color "$RED" "Error: Sandbox '$project' not found"
+    exit 1
+  fi
+
+  echo "Removing sandbox: $project"
+  docker stop "$container_name" 2>/dev/null || true
+  docker rm "$container_name" 2>/dev/null || true
+  color "$GREEN" "✓ Sandbox '$project' removed"
+}
+
+attach_sandbox() {
+  local project="$1"
+  local container_name="claude-sandbox-$project"
+
+  if ! docker ps --format "{{.Names}}" | grep -q "^${container_name}$"; then
+    color "$RED" "Error: Sandbox '$project' is not running"
+    echo "Start it first or create a new one."
+    exit 1
+  fi
+
+  echo "Attaching to sandbox: $project"
+  echo "Run 'claude' to start Claude Code"
+  echo ""
+
+  docker exec -it -u user -w /opt/project "$container_name" /bin/bash
+}
+
+create_sandbox() {
+  local project="$1"
+  local github_token="$2"
+  local project_dir="$3"
+  local username="user"
+
+  local container_name="claude-sandbox-$project"
+
+  # Check if container already exists
+  if docker ps -a --format "{{.Names}}" | grep -q "^${container_name}$"; then
+    color "$YELLOW" "Warning: Sandbox '$project' already exists"
+    read -p "Remove and recreate? [y/N] " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      remove_sandbox "$project"
+    else
+      echo "Aborted. Use --attach to connect to existing sandbox."
+      exit 1
+    fi
+  fi
+
+  # Validate project directory
+  if [ ! -d "$project_dir" ]; then
+    color "$RED" "Error: Project directory does not exist: $project_dir"
+    exit 1
+  fi
+
+  # Show token warning
+  show_token_warning
+
+  read -p "I confirm I am using a FINE-GRAINED token with minimal permissions [y/N] " -n 1 -r
+  echo ""
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    color "$RED" "Aborted. Please create a fine-grained token first."
+    echo "Visit: https://github.com/settings/tokens?type=beta"
+    exit 1
+  fi
+
+  echo ""
+  color "$BLUE" "Creating sandbox: $project"
+  echo "Container: $container_name"
+  echo "Shared directory: $project_dir"
+  echo ""
+
+  # Start the container
+  color "$BLUE" "[1/7] Starting Ubuntu container..."
+  docker run \
+    --name "$container_name" \
+    --rm \
+    --detach \
+    -v "$project_dir:/opt/project" \
+    ubuntu:24.04 \
+    sleep infinity > /dev/null || { color "$RED" "Error: Failed to start container"; exit 1; }
+
+  color "$GREEN" "  ✓ Container started"
+
+  # Set permissions for tmp directories
+  color "$BLUE" "[2/7] Setting up permissions..."
+  docker exec "$container_name" bash -c "chmod a+rwx /tmp /var/tmp 2>/dev/null || true"
+  color "$GREEN" "  ✓ Permissions configured"
+
+  # Install packages
+  color "$BLUE" "[3/7] Installing packages (this may take a minute)..."
+  docker exec "$container_name" bash -c "
+    apt-get update -qq && \
+    apt-get install -y -qq ca-certificates curl git gh sudo > /dev/null 2>&1 && \
+    update-ca-certificates > /dev/null 2>&1
+  " || { color "$RED" "Error: Failed to install packages"; exit 1; }
+  color "$GREEN" "  ✓ Packages installed"
+
+  # Create user
+  color "$BLUE" "[4/7] Creating user..."
+  docker exec "$container_name" bash -c "
+    useradd -m $username --password password --shell /bin/bash && \
+    echo '$username ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+  " || { color "$RED" "Error: Failed to create user"; exit 1; }
+  color "$GREEN" "  ✓ User created"
+
+  # Set ownership of project directory
+  color "$BLUE" "[5/7] Configuring project directory..."
+  docker exec "$container_name" bash -c "chown -R '$username:$username' /opt/project 2>/dev/null || true"
+  color "$GREEN" "  ✓ Project directory configured"
+
+  # Install Claude Code
+  color "$BLUE" "[6/7] Installing Claude Code..."
+  docker exec -u "$username" "$container_name" bash -c "
+    curl -fsSL https://claude.ai/install.sh | bash > /dev/null 2>&1
+  " || { color "$RED" "Error: Failed to install Claude Code"; exit 1; }
+  color "$GREEN" "  ✓ Claude Code installed"
+
+  # Configure environment
+  color "$BLUE" "[7/7] Configuring environment..."
+
+  # Get current user's git config from host
+  local git_name git_email
+  git_name=$(git config --get user.name 2>/dev/null || echo "$username")
+  git_email=$(git config --get user.email 2>/dev/null || echo "$username@sandbox.local")
+
+  docker exec -u "$username" "$container_name" bash -c "
+    echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc
+    echo 'cd /opt/project' >> ~/.bashrc
+
+    # Configure git
+    git config --global --add safe.directory /opt/project
+    git config --global user.name '$git_name'
+    git config --global user.email '$git_email'
+  " || { color "$RED" "Error: Failed to configure environment"; exit 1; }
+
+  # Authenticate gh CLI
+  docker exec -u "$username" "$container_name" bash -c "
+    echo '$github_token' | gh auth login --with-token --git-protocol https
+  " || { color "$RED" "Error: Failed to authenticate gh CLI"; exit 1; }
+
+  color "$GREEN" "  ✓ Environment configured"
+
+  echo ""
+  color "$GREEN" "════════════════════════════════════════════════════════════════════"
+  color "$GREEN" "  Sandbox '$project' created successfully!"
+  color "$GREEN" "════════════════════════════════════════════════════════════════════"
+  echo ""
+  echo "To connect to the sandbox:"
+  color "$BLUE" "  docker exec -it -u user -w /opt/project $container_name /bin/bash"
+  echo ""
+  echo "To remove the sandbox later:"
+  color "$YELLOW" "  docker stop $container_name"
+  echo ""
+}
+
+# Main
+main() {
+  local project=""
+  local github_token=""
+  local project_dir=""
+  local action="create"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|-h)
+        show_help
+        exit 0
+        ;;
+      --list|-l)
+        list_sandboxes
+        exit 0
+        ;;
+      --remove|-r)
+        action="remove"
+        shift
+        ;;
+      --attach|-a)
+        action="attach"
+        shift
+        ;;
+      --shared-dir|-d)
+        project_dir="$2"
+        shift 2
+        ;;
+      -*)
+        color "$RED" "Error: Unknown option: $1"
+        echo ""
+        show_help
+        exit 1
+        ;;
+      *)
+        if [ -z "$project" ]; then
+          project="$1"
+        elif [ -z "$github_token" ]; then
+          github_token="$1"
+        else
+          color "$RED" "Error: Unexpected argument: $1"
+          exit 1
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  # Validate arguments based on action
+  case "$action" in
+    create)
+      if [ -z "$project" ] || [ -z "$github_token" ] || [ -z "$project_dir" ]; then
+        color "$RED" "Error: create requires project-name, github-token, and --shared-dir"
+        echo ""
+        echo "Usage: setup-docker-sandbox <project-name> <github-token> --shared-dir <path>"
+        show_token_link
+        exit 1
+      fi
+      create_sandbox "$project" "$github_token" "$project_dir"
+      ;;
+    remove)
+      if [ -z "$project" ]; then
+        color "$RED" "Error: --remove requires project name"
+        exit 1
+      fi
+      remove_sandbox "$project"
+      ;;
+    attach)
+      if [ -z "$project" ]; then
+        color "$RED" "Error: --attach requires project name"
+        exit 1
+      fi
+      attach_sandbox "$project"
+      ;;
+  esac
+}
+
+main "$@"
