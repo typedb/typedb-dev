@@ -101,6 +101,33 @@ get_modified_count() {
   git -C "$REPOS_DIR/$repo" status --porcelain 2>/dev/null | wc -l | tr -d ' '
 }
 
+# Get base branch for a repo from its CLAUDE.md, or return default
+get_base_branch() {
+  local repo="$1"
+  local claude_md="$REPOS_DIR/$repo/CLAUDE.md"
+  local base_branch="master"
+
+  if [ -f "$claude_md" ]; then
+    # Look for "Base branch:" pattern in CLAUDE.md (handles markdown formatting like **bold** and `backticks`)
+    local line
+    line=$(grep -iE "(base[_ ]?branch)\s*\**\s*:" "$claude_md" 2>/dev/null | head -1)
+    if [ -n "$line" ]; then
+      # Extract value between backticks, or after colon if no backticks
+      local found_branch
+      found_branch=$(echo "$line" | grep -o '`[^`]*`' | head -1 | tr -d '`')
+      if [ -z "$found_branch" ]; then
+        # No backticks, try to get word after colon
+        found_branch=$(echo "$line" | sed 's/.*://' | tr -d '[:space:]' | head -1)
+      fi
+      if [ -n "$found_branch" ]; then
+        base_branch="$found_branch"
+      fi
+    fi
+  fi
+
+  echo "$base_branch"
+}
+
 # Command: init
 # Initialize submodules and configure remotes
 cmd_init() {
@@ -447,6 +474,113 @@ cmd_commit() {
   fi
 }
 
+# Command: push
+# Push feature branch to fork remote and show PR links
+cmd_push() {
+  if [ $# -lt 2 ]; then
+    echo "Error: push requires fork remote name and feature branch"
+    echo "Usage: repo push <fork-remote> <feature>"
+    exit 1
+  fi
+
+  local fork_remote="$1"
+  local feature="$2"
+
+  if [ "$feature" = "master" ]; then
+    echo "Error: Cannot push 'master' as a feature branch"
+    exit 1
+  fi
+
+  echo "Pushing feature branch '$feature' to remote '$fork_remote'"
+  echo ""
+
+  local pushed_repos=()
+  local pr_links=()
+  local missing_claude_md=()
+
+  for repo in "${ALL_REPOS[@]}"; do
+    if ! validate_repo "$repo"; then
+      continue
+    fi
+
+    local repo_path="$REPOS_DIR/$repo"
+    local branch
+    branch=$(get_branch "$repo")
+
+    # Skip repos not on the feature branch
+    if [ "$branch" != "$feature" ]; then
+      continue
+    fi
+
+    # Check if fork remote exists
+    if ! git -C "$repo_path" remote get-url "$fork_remote" &>/dev/null; then
+      color "$YELLOW" "  - $repo - remote '$fork_remote' not configured (add with: git remote add $fork_remote git@github.com:$fork_remote/$repo.git)"
+      continue
+    fi
+
+    # Check if repo has a CLAUDE.md with base branch
+    local claude_md="$repo_path/CLAUDE.md"
+    local base_branch
+    base_branch=$(get_base_branch "$repo")
+
+    if [ ! -f "$claude_md" ]; then
+      missing_claude_md+=("$repo")
+    elif [ "$base_branch" = "master" ]; then
+      # Check if CLAUDE.md exists but doesn't have base branch specified
+      if ! grep -qiE "(base[_ ]?branch)\s*\**\s*:" "$claude_md" 2>/dev/null; then
+        missing_claude_md+=("$repo (CLAUDE.md exists but no base branch specified)")
+      fi
+    fi
+
+    # Push to fork remote
+    if git -C "$repo_path" push -u "$fork_remote" "$feature" 2>/dev/null; then
+      color "$GREEN" "  ✓ $repo - pushed to $fork_remote/$feature"
+      pushed_repos+=("$repo")
+
+      # Generate PR link
+      local pr_url="https://github.com/typedb/$repo/compare/${base_branch}...$fork_remote:$feature?expand=1"
+      pr_links+=("$repo|$base_branch|$pr_url")
+    else
+      color "$RED" "  ✗ $repo - push failed"
+    fi
+  done
+
+  echo ""
+
+  # Show PR links
+  if [ ${#pushed_repos[@]} -gt 0 ]; then
+    echo "Create Pull Requests:"
+    echo "====================="
+    echo ""
+    for link_info in "${pr_links[@]}"; do
+      local repo_name base pr_url
+      repo_name=$(echo "$link_info" | cut -d'|' -f1)
+      base=$(echo "$link_info" | cut -d'|' -f2)
+      pr_url=$(echo "$link_info" | cut -d'|' -f3)
+      echo "  $repo_name (base: $base):"
+      echo "    $pr_url"
+      echo ""
+    done
+  fi
+
+  # Warn about missing CLAUDE.md or base branch
+  if [ ${#missing_claude_md[@]} -gt 0 ]; then
+    echo ""
+    color "$YELLOW" "Warning: The following repos need CLAUDE.md with base branch specification:"
+    for repo in "${missing_claude_md[@]}"; do
+      color "$YELLOW" "  - $repo"
+    done
+    echo ""
+  fi
+
+  if [ ${#pushed_repos[@]} -eq 0 ]; then
+    echo "No repositories found on branch '$feature'"
+    echo "Use 'tool/repo checkout $feature <repos...>' first"
+  else
+    echo "Done. Pushed ${#pushed_repos[@]} repo(s)."
+  fi
+}
+
 # Command: list
 # List all repos
 cmd_list() {
@@ -473,6 +607,7 @@ Commands:
   switch <feature> <repo1> [repo2...]     Switch to existing feature branch
   status [--feature <name>]               Show status of all repos
   commit <feature> "<message>"            Commit changes in all repos on feature branch
+  push <fork-remote> <feature>            Push feature branch to fork and show PR links
   reset <repo1> [repo2...]                Reset repos to master
   fetch [repo1] [repo2...]                Fetch from remote (all if none specified)
   list                                    List all available repos
@@ -484,6 +619,7 @@ Examples:
   repo switch existing-feature typedb typeql
   repo status --feature new-feature
   repo commit new-feature "Add new query type support"
+  repo push myusername new-feature        # Push to fork and get PR links
   repo reset typedb typeql typedb-driver
   repo fetch
   repo list
@@ -525,6 +661,14 @@ main() {
       ;;
     commit)
       cmd_commit "$@"
+      ;;
+    push)
+      if [ $# -lt 2 ]; then
+        echo "Error: push requires fork remote name and feature branch"
+        echo "Usage: repo push <fork-remote> <feature>"
+        exit 1
+      fi
+      cmd_push "$@"
       ;;
     reset)
       if [ $# -lt 1 ]; then
