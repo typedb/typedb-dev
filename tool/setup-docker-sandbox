@@ -150,7 +150,7 @@ attach_sandbox() {
   echo "Run 'claude' to start Claude Code"
   echo ""
 
-  docker exec -it -u user -w /opt/project "$container_name" /bin/bash
+  docker exec -it -u user "$container_name" /bin/bash
 }
 
 create_sandbox() {
@@ -253,7 +253,6 @@ create_sandbox() {
 
   docker exec -u "$username" "$container_name" bash -c "
     echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc
-    echo 'cd /opt/project' >> ~/.bashrc
 
     # Configure git
     git config --global --add safe.directory /opt/project
@@ -274,7 +273,7 @@ create_sandbox() {
   color "$GREEN" "════════════════════════════════════════════════════════════════════"
   echo ""
   echo "To connect to the sandbox:"
-  color "$BLUE" "  docker exec -it -u user -w /opt/project $container_name /bin/bash"
+  color "$BLUE" "  docker exec -it -u user $container_name /bin/bash"
   echo ""
   echo "To remove the sandbox later:"
   color "$YELLOW" "  docker stop $container_name"
