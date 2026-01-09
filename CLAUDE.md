@@ -90,11 +90,12 @@ The `tool/repo` script manages submodules and branches.
 
 | Command | Description |
 |---------|-------------|
-| `init [repos...]` | Initialize submodules and configure remotes |
+| `init [repos...]` | Initialize submodules, configure remotes, and add user's fork |
 | `checkout <feature> <repos...>` | Create/checkout feature branch in specified repos |
 | `switch <feature> <repos...>` | Switch to existing feature branch (fetches from remote if needed) |
 | `status [--feature <name>]` | Show status of all repos |
 | `commit <feature> "<message>"` | Commit changes in all repos on the feature branch |
+| `push <fork> <feature>` | Push feature branch to fork and show PR links |
 | `reset <repos...>` | Reset repos back to master |
 | `fetch [repos...]` | Fetch from remote (all repos if none specified) |
 | `list` | List all available repos |
@@ -111,6 +112,9 @@ tool/repo status --feature add-new-query-type
 # Commit changes across all repos on the feature branch
 tool/repo commit add-new-query-type "Add new query type support"
 
+# Push to your fork and get PR links
+tool/repo push myusername add-new-query-type
+
 # Fetch latest changes
 tool/repo fetch typedb typeql
 
@@ -119,6 +123,39 @@ tool/repo reset typedb typeql
 ```
 
 **Note:** The `commit` command only commits to submodule repositories on the specified feature branch. The meta-repository (`typedb-dev`) should be committed manually to avoid accidental submodule pointer updates.
+
+## Slash Commands
+
+Custom Claude Code commands available in this repository (invoke with `/command-name`):
+
+| Command | Description |
+|---------|-------------|
+| `/review [files]` | Review changes for architectural correctness, simplicity, clarity, and edge cases |
+| `/cross-repo-impact [repo]` | Analyze changes and identify cross-repository impacts |
+| `/sync-local-deps <repo>` | Generate local Bazel dependency overrides for development |
+
+### Review Command
+
+The `/review` command performs a comprehensive code review based on TypeDB development principles:
+
+- **Architectural correctness** - Follows existing patterns and module boundaries
+- **Simplicity** - No over-engineering, premature abstractions, or unnecessary complexity
+- **Clarity** - Readable, well-named, self-documenting code
+- **Correctness** - Proper error handling and edge case coverage:
+  - Empty/null inputs
+  - Boundary conditions
+  - Concurrent access
+  - Resource cleanup
+  - Invalid state transitions
+- **Cross-repo impact** - Identifies changes that may affect other repositories
+
+```bash
+# Review all uncommitted changes
+/review
+
+# Review specific files
+/review src/query/executor.rs
+```
 
 ## Repositories
 

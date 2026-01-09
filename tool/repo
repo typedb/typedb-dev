@@ -128,6 +128,16 @@ get_base_branch() {
   echo "$base_branch"
 }
 
+# Get GitHub username
+get_github_username() {
+  # Try gh CLI first
+  if command -v gh &>/dev/null; then
+    gh api user -q .login 2>/dev/null && return
+  fi
+  # Fall back to git config
+  git config --get github.user 2>/dev/null
+}
+
 # Command: init
 # Initialize submodules and configure remotes
 cmd_init() {
@@ -171,6 +181,40 @@ cmd_init() {
       color "$YELLOW" "  - $repo - no remote to configure"
     fi
   done
+
+  echo ""
+
+  # Add user's fork as remote
+  local github_user
+  github_user=$(get_github_username)
+
+  if [ -z "$github_user" ]; then
+    echo "Skipping fork remote setup (GitHub username not found)"
+    echo "To configure, run: gh auth login  OR  git config --global github.user <username>"
+  else
+    echo "Adding fork remotes for user: $github_user"
+    echo ""
+
+    for repo in "${repos[@]}"; do
+      local repo_path="$REPOS_DIR/$repo"
+
+      if [ ! -d "$repo_path" ] || { [ ! -d "$repo_path/.git" ] && [ ! -f "$repo_path/.git" ]; }; then
+        continue
+      fi
+
+      # Check if user remote already exists
+      if git -C "$repo_path" remote get-url "$github_user" &>/dev/null; then
+        color "$BLUE" "  ● $repo - remote '$github_user' already configured"
+      else
+        local fork_url="git@github.com:$github_user/$repo.git"
+        if git -C "$repo_path" remote add "$github_user" "$fork_url" 2>/dev/null; then
+          color "$GREEN" "  ✓ $repo - added remote '$github_user'"
+        else
+          color "$RED" "  ✗ $repo - failed to add remote '$github_user'"
+        fi
+      fi
+    done
+  fi
 
   echo ""
   echo "Done. Run 'tool/repo status' to verify."

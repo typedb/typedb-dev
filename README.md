@@ -16,6 +16,13 @@ tool/repo init
 tool/repo init typedb typeql typedb-driver
 ```
 
+The `init` command will:
+1. Initialize git submodules
+2. Rename `origin` remote to `typedb` (upstream)
+3. Add your GitHub fork as a remote named after your username
+
+Your GitHub username is detected via `gh` CLI or `git config github.user`.
+
 ## Quick Start
 
 ```bash
@@ -65,16 +72,17 @@ The `tool/repo` script manages submodules and branches.
 
 | Command | Description |
 |---------|-------------|
-| `init [repos...]` | Initialize submodules and configure remotes |
+| `init [repos...]` | Initialize submodules, configure remotes, and add user's fork |
 | `checkout <feature> <repos...>` | Create/checkout feature branch in specified repos |
 | `switch <feature> <repos...>` | Switch to existing feature branch (fetches from remote) |
 | `status [--feature <name>]` | Show status of all repos |
 | `commit <feature> "<message>"` | Commit changes in all repos on the feature branch |
+| `push <fork> <feature>` | Push feature branch to fork and show PR links |
 | `reset <repos...>` | Reset repos back to master |
 | `fetch [repos...]` | Fetch from remote (all repos if none specified) |
 | `list` | List all available repos |
 
-**Note:** The `commit` command only commits to submodule repositories. The meta-repository should be committed manually.
+**Note:** The `commit` and `push` commands only operate on submodule repositories. The meta-repository should be committed/pushed manually.
 
 ## Dependency Graph
 
