@@ -59,6 +59,7 @@ When modifying this `typedb-dev` repository itself (scripts, tooling, configurat
 - **Self-contained**: Use paths relative to the repository root (e.g., `$SCRIPT_DIR`, `$(dirname "$0")`)
 - **Standard tools**: Prefer POSIX-compatible shell constructs; avoid bash-specific features where possible
 - **No environment assumptions**: Don't assume specific environment variables are set (except standard ones like `$HOME`)
+- **Claude settings**: Keep `.claude/settings.local.json` path and user agnostic - use relative paths (e.g., `./tool/script`) so settings work for any team member cloning the repository
 
 ## Quick Start
 

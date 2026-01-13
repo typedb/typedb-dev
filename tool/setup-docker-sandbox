@@ -201,7 +201,6 @@ create_sandbox() {
   color "$BLUE" "[1/7] Starting Ubuntu container..."
   docker run \
     --name "$container_name" \
-    --rm \
     --detach \
     -v "$project_dir:/opt/project" \
     ubuntu:24.04 \
