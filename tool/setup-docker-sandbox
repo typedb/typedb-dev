@@ -150,7 +150,7 @@ attach_sandbox() {
   echo "Run 'claude' to start Claude Code"
   echo ""
 
-  docker exec -it -u user "$container_name" /bin/bash
+  docker exec -it -u user -w /home/user "$container_name" /bin/bash
 }
 
 create_sandbox() {
@@ -222,10 +222,10 @@ create_sandbox() {
   " || { color "$RED" "Error: Failed to install packages"; exit 1; }
   color "$GREEN" "  ✓ Packages installed"
 
-  # Create user
+  # Create user with explicit home directory (not the shared mount)
   color "$BLUE" "[4/7] Creating user..."
   docker exec "$container_name" bash -c "
-    useradd -m $username --password password --shell /bin/bash && \
+    useradd -m -d /home/$username $username --password password --shell /bin/bash && \
     echo '$username ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
   " || { color "$RED" "Error: Failed to create user"; exit 1; }
   color "$GREEN" "  ✓ User created"
@@ -272,7 +272,7 @@ create_sandbox() {
   color "$GREEN" "════════════════════════════════════════════════════════════════════"
   echo ""
   echo "To connect to the sandbox:"
-  color "$BLUE" "  docker exec -it -u user $container_name /bin/bash"
+  color "$BLUE" "  docker exec -it -u user -w /home/user $container_name /bin/bash"
   echo ""
   echo "To remove the sandbox later:"
   color "$YELLOW" "  docker stop $container_name"

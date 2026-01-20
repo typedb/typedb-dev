@@ -186,6 +186,7 @@ The `/review` command performs a comprehensive code review based on TypeDB devel
 | `dependencies` | Shared Bazel build configuration |
 | `bazel-distribution` | Package deployment rules |
 | `typedb-behaviour` | BDD test specifications |
+| `typedb-benchmark` | Performance benchmarks |
 | `typedb-docs` | Documentation site |
 | `typedb-examples` | Example projects |
 | `typedb-web` | Website |

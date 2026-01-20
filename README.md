@@ -66,6 +66,7 @@ typedb-dev/
     ├── dependencies/      # Shared Bazel build config
     ├── bazel-distribution/ # Package deployment rules
     ├── typedb-behaviour/  # BDD test specifications
+    ├── typedb-benchmark/  # Performance benchmarks
     ├── typedb-docs/       # Documentation site
     └── typedb-examples/   # Example projects
 ```

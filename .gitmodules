@@ -1,45 +1,48 @@
 [submodule "repositories/typedb"]
 	path = repositories/typedb
-	url = git@github.com:typedb/typedb.git
+	url = https://github.com/typedb/typedb.git
 [submodule "repositories/typedb-driver"]
 	path = repositories/typedb-driver
-	url = git@github.com:typedb/typedb-driver.git
+	url = https://github.com/typedb/typedb-driver.git
 [submodule "repositories/typeql"]
 	path = repositories/typeql
-	url = git@github.com:typedb/typeql.git
+	url = https://github.com/typedb/typeql.git
 [submodule "repositories/typedb-protocol"]
 	path = repositories/typedb-protocol
-	url = git@github.com:typedb/typedb-protocol.git
+	url = https://github.com/typedb/typedb-protocol.git
 [submodule "repositories/typedb-console"]
 	path = repositories/typedb-console
-	url = git@github.com:typedb/typedb-console.git
+	url = https://github.com/typedb/typedb-console.git
 [submodule "repositories/typedb-studio"]
 	path = repositories/typedb-studio
-	url = git@github.com:typedb/typedb-studio.git
+	url = https://github.com/typedb/typedb-studio.git
 [submodule "repositories/dependencies"]
 	path = repositories/dependencies
-	url = git@github.com:typedb/dependencies.git
+	url = https://github.com/typedb/dependencies.git
 [submodule "repositories/bazel-distribution"]
 	path = repositories/bazel-distribution
-	url = git@github.com:typedb/bazel-distribution.git
+	url = https://github.com/typedb/bazel-distribution.git
 [submodule "repositories/typedb-behaviour"]
 	path = repositories/typedb-behaviour
-	url = git@github.com:typedb/typedb-behaviour.git
+	url = https://github.com/typedb/typedb-behaviour.git
 [submodule "repositories/typedb-docs"]
 	path = repositories/typedb-docs
-	url = git@github.com:typedb/typedb-docs.git
+	url = https://github.com/typedb/typedb-docs.git
 [submodule "repositories/typedb-examples"]
 	path = repositories/typedb-examples
-	url = git@github.com:typedb/typedb-examples.git
+	url = https://github.com/typedb/typedb-examples.git
 [submodule "repositories/typedb-web"]
 	path = repositories/typedb-web
-	url = git@github.com:typedb/typedb-web.git
+	url = https://github.com/typedb/typedb-web.git
 [submodule "repositories/typedb-cluster"]
 	path = repositories/typedb-cluster
-	url = git@github.com:typedb/typedb-cluster.git
+	url = https://github.com/typedb/typedb-cluster.git
 [submodule "repositories/typedb-cloud"]
 	path = repositories/typedb-cloud
-	url = git@github.com:typedb/typedb-cloud.git
+	url = https://github.com/typedb/typedb-cloud.git
 [submodule "repositories/typedb-cloud-infrastructure"]
 	path = repositories/typedb-cloud-infrastructure
-	url = git@github.com:typedb/typedb-cloud-infrastructure.git
+	url = https://github.com/typedb/typedb-cloud-infrastructure.git
+[submodule "repositories/typedb-benchmark"]
+	path = repositories/typedb-benchmark
+	url = https://github.com/typedb/typedb-benchmark.git
