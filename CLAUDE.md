@@ -91,15 +91,17 @@ The `tool/repo` script manages submodules and branches.
 
 | Command | Description |
 |---------|-------------|
-| `init [repos...]` | Initialize submodules, configure remotes, and add user's fork |
-| `checkout <feature> <repos...>` | Create/checkout feature branch in specified repos |
+| `init [repos...]` | Initialize submodules, configure remotes, fetch latest, and checkout base branches |
+| `checkout <feature> <repos...>` | Create feature branch from `typedb/<base_branch>` (always fetches latest first) |
 | `switch <feature> <repos...>` | Switch to existing feature branch (fetches from remote if needed) |
 | `status [--feature <name>]` | Show status of all repos |
 | `commit <feature> "<message>"` | Commit changes in all repos on the feature branch |
 | `push <fork> <feature>` | Push feature branch to fork and show PR links |
-| `reset <repos...>` | Reset repos back to master |
+| `reset <repos...>` | Reset repos to base branch (fetches and syncs with `typedb` remote) |
 | `fetch [repos...]` | Fetch from remote (all repos if none specified) |
 | `list` | List all available repos |
+
+**Note:** Base branches are determined from each repository's `CLAUDE.md` file (usually `master`, but may vary per repo).
 
 ### Examples
 
@@ -221,7 +223,35 @@ When changes span repos, merge PRs in this order:
 - **Remote name**: `typedb` (not `origin`)
 - **URLs**: SSH format (`git@github.com:typedb/<repo>.git`)
 - **Default branch**: `master`
-- **Branch base**: Feature branches fork from `typedb/master`. When looking for diffs, use `typedb/master` as the base (e.g., `git diff typedb/master...HEAD`), or find the nearest ancestor branch if the feature branch is based on another branch.
+
+**Note:** For token-based authenticated git sessions (e.g., GitHub personal access tokens), you may need to switch remote URLs from SSH to HTTPS format:
+```bash
+# Check current remote URL
+git remote get-url typedb
+
+# Switch to HTTPS if needed for token auth
+git remote set-url typedb https://github.com/typedb/<repo>.git
+```
+
+### Creating Feature Branches
+
+**IMPORTANT: Always create new branches from the `typedb` remote's base branch.**
+
+Each repository specifies its base branch in its own `CLAUDE.md` file (usually `master`, but some repos like `typedb-docs` use `3.x-development`). Before creating any feature branch, you MUST:
+1. Check the repository's `CLAUDE.md` for the correct base branch
+2. Fetch the latest changes from the `typedb` remote
+3. Create the branch from `typedb/<base-branch>` (not from your current HEAD or any other branch)
+
+```bash
+# Correct way to create a feature branch
+git fetch typedb
+git checkout -b my-feature typedb/master  # or typedb/<base-branch> per repo's CLAUDE.md
+
+# WRONG - do not do this (creates from current HEAD)
+git checkout -b my-feature
+```
+
+This ensures feature branches are always based on the latest upstream code and avoids merge conflicts or stale base commits. When looking for diffs, use `typedb/<base-branch>` as the base (e.g., `git diff typedb/master...HEAD`).
 
 ### Pushing Changes
 
