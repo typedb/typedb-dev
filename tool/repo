@@ -442,9 +442,7 @@ cmd_reset() {
   local repos=("$@")
 
   if [ ${#repos[@]} -eq 0 ]; then
-    echo "Error: No repos specified"
-    echo "Usage: repo reset <repo1> [repo2...]"
-    exit 1
+    repos=("${ALL_REPOS[@]}")
   fi
 
   echo "Resetting to base branches (fetching latest from $REMOTE_NAME)"
@@ -723,7 +721,7 @@ Commands:
   status [--feature <name>]               Show status of all repos
   commit <feature> "<message>"            Commit changes in all repos on feature branch
   push <fork-remote> <feature>            Push feature branch to fork and show PR links
-  reset <repo1> [repo2...]                Reset repos to base branch (fetches latest from typedb remote)
+  reset [repo1] [repo2...]                Reset repos to base branch (all if none specified)
   fetch [repo1] [repo2...]                Fetch from remote (all if none specified)
   list                                    List all available repos
 
@@ -740,6 +738,7 @@ Examples:
   repo status --feature new-feature
   repo commit new-feature "Add new query type support"
   repo push myusername new-feature        # Push to fork and get PR links
+  repo reset                              # Reset all repos to base branches
   repo reset typedb typeql typedb-driver
   repo fetch
   repo list
@@ -791,11 +790,6 @@ main() {
       cmd_push "$@"
       ;;
     reset)
-      if [ $# -lt 1 ]; then
-        echo "Error: reset requires at least one repo"
-        echo "Usage: repo reset <repo1> [repo2...]"
-        exit 1
-      fi
       cmd_reset "$@"
       ;;
     fetch)

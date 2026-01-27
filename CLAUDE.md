@@ -76,7 +76,10 @@ tool/repo checkout my-feature typedb typeql typedb-driver
 # Switch to an existing feature branch
 tool/repo switch existing-feature typedb typeql
 
-# Reset repos back to master when done
+# Reset all repos back to their base branches when done
+tool/repo reset
+
+# Or reset specific repos only
 tool/repo reset typedb typeql typedb-driver
 
 # Fetch latest from all repos
@@ -97,7 +100,7 @@ The `tool/repo` script manages submodules and branches.
 | `status [--feature <name>]` | Show status of all repos |
 | `commit <feature> "<message>"` | Commit changes in all repos on the feature branch |
 | `push <fork> <feature>` | Push feature branch to fork and show PR links |
-| `reset <repos...>` | Reset repos to base branch (fetches and syncs with `typedb` remote) |
+| `reset [repos...]` | Reset repos to base branch (all if none specified) |
 | `fetch [repos...]` | Fetch from remote (all repos if none specified) |
 | `list` | List all available repos |
 
@@ -202,7 +205,7 @@ When implementing a feature that spans multiple repositories:
 3. **Implement changes** - Work in each repo as needed
 4. **Test integration** - Ensure changes work together
 5. **Create PRs** - Submit PRs in dependency order (see below)
-6. **Reset when done** - Use `tool/repo reset <repos...>`
+6. **Reset when done** - Use `tool/repo reset` (all repos) or `tool/repo reset <repos...>`
 
 ### Dependency Order for PRs
 
