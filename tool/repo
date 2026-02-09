@@ -519,6 +519,74 @@ cmd_fetch() {
   echo "Done."
 }
 
+# Command: pull
+# Fetch and fast-forward current branch to latest from remote
+cmd_pull() {
+  local repos=("$@")
+
+  if [ ${#repos[@]} -eq 0 ]; then
+    repos=("${ALL_REPOS[@]}")
+  fi
+
+  echo "Pulling latest from remote: $REMOTE_NAME"
+  echo ""
+
+  for repo in "${repos[@]}"; do
+    if ! validate_repo "$repo"; then
+      color "$RED" "  ✗ $repo - not a valid submodule"
+      continue
+    fi
+
+    local repo_path="$REPOS_DIR/$repo"
+    local branch
+    branch=$(get_branch "$repo")
+
+    if [ "$branch" = "HEAD" ]; then
+      color "$YELLOW" "  - $repo - detached HEAD, skipping"
+      continue
+    fi
+
+    # Check for uncommitted changes
+    if ! is_clean "$repo"; then
+      color "$YELLOW" "  - $repo - has uncommitted changes, skipping"
+      continue
+    fi
+
+    # Fetch the current branch from remote
+    if ! git -C "$repo_path" fetch "$REMOTE_NAME" "$branch" &>/dev/null 2>&1; then
+      # Branch might not exist on remote (e.g., local feature branch)
+      color "$BLUE" "  ● $repo - $branch (no remote tracking)"
+      continue
+    fi
+
+    # Check if remote branch exists
+    if ! git -C "$repo_path" rev-parse "$REMOTE_NAME/$branch" &>/dev/null; then
+      color "$BLUE" "  ● $repo - $branch (no remote tracking)"
+      continue
+    fi
+
+    # Try to fast-forward merge
+    local before_sha after_sha
+    before_sha=$(git -C "$repo_path" rev-parse HEAD)
+
+    if git -C "$repo_path" merge --ff-only "$REMOTE_NAME/$branch" &>/dev/null 2>&1; then
+      after_sha=$(git -C "$repo_path" rev-parse HEAD)
+      if [ "$before_sha" = "$after_sha" ]; then
+        color "$BLUE" "  ● $repo - $branch (already up to date)"
+      else
+        local commits_pulled
+        commits_pulled=$(git -C "$repo_path" rev-list --count "$before_sha..$after_sha")
+        color "$GREEN" "  ✓ $repo - $branch (pulled $commits_pulled commit(s))"
+      fi
+    else
+      color "$YELLOW" "  - $repo - $branch (cannot fast-forward, manual merge needed)"
+    fi
+  done
+
+  echo ""
+  echo "Done."
+}
+
 # Command: commit
 # Commit changes across all repos on a feature branch
 cmd_commit() {
@@ -723,6 +791,7 @@ Commands:
   push <fork-remote> <feature>            Push feature branch to fork and show PR links
   reset [repo1] [repo2...]                Reset repos to base branch (all if none specified)
   fetch [repo1] [repo2...]                Fetch from remote (all if none specified)
+  pull [repo1] [repo2...]                 Pull (fetch + fast-forward) current branches (all if none specified)
   list                                    List all available repos
 
 Notes:
@@ -794,6 +863,9 @@ main() {
       ;;
     fetch)
       cmd_fetch "$@"
+      ;;
+    pull)
+      cmd_pull "$@"
       ;;
     list)
       cmd_list

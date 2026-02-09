@@ -84,6 +84,9 @@ tool/repo reset typedb typeql typedb-driver
 
 # Fetch latest from all repos
 tool/repo fetch
+
+# Pull latest changes into current branches (fetch + fast-forward)
+tool/repo pull
 ```
 
 ## Repository Tool
@@ -102,6 +105,7 @@ The `tool/repo` script manages submodules and branches.
 | `push <fork> <feature>` | Push feature branch to fork and show PR links |
 | `reset [repos...]` | Reset repos to base branch (all if none specified) |
 | `fetch [repos...]` | Fetch from remote (all repos if none specified) |
+| `pull [repos...]` | Pull (fetch + fast-forward) current branches (all if none specified) |
 | `list` | List all available repos |
 
 **Note:** Base branches are determined from each repository's `CLAUDE.md` file (usually `master`, but may vary per repo).
