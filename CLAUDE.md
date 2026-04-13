@@ -22,6 +22,8 @@ We put a huge emphasis on **architectural correctness**, **cohesion** with other
 
 7. **Keep documentation current** - If your changes affect architecture, APIs, or setup procedures, update the relevant `README.md` and `architecture.md` files as part of the change.
 
+8. **Don't assume the user is right** - Validate data, inputs, and assumptions provided by the user where needed. If an alternative approach, opposing view, or counterfactual is worth considering, surface it rather than silently going along with the user's framing. Push back respectfully when the evidence warrants it.
+
 ### Cross-Repository Validation
 
 When implementing a feature or change, always check if other repositories may need updates. Flag any cross-repo impacts to the developer once the feature is complete.

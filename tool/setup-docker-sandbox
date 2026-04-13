@@ -55,6 +55,15 @@ Security Model:
   - Non-root user inside container
   - GitHub token should be fine-grained with minimal permissions
 
+Required fine-grained token permissions:
+  Repository permissions (scoped to target repos only):
+    - Contents: Read and write
+    - Pull Requests: Read and write
+  Account permissions:
+    - Git SSH signing keys: Read and write
+      (Used to auto-register an ed25519 signing key so commits made
+       inside the sandbox are shown as "Verified" on GitHub.)
+
 EOF
 }
 
@@ -81,8 +90,9 @@ show_token_warning() {
   color "$RED" "║    ✗ NO admin or delete permissions                                         ║"
   color "$RED" "║    ✗ NO workflow permissions (unless required)                              ║"
   color "$RED" "║    ✓ Limited to ONLY the repositories you need                              ║"
-  color "$RED" "║    ✓ Read/Write Contents (for commits)                                      ║"
-  color "$RED" "║    ✓ Read/Write Pull Requests (for PRs)                                     ║"
+  color "$RED" "║    ✓ Repository → Contents: Read/Write (for commits)                        ║"
+  color "$RED" "║    ✓ Repository → Pull Requests: Read/Write (for PRs)                       ║"
+  color "$RED" "║    ✓ Account → Git SSH signing keys: Read/Write (for verified commits)      ║"
   color "$RED" "║    ✓ Short expiration time (7-30 days recommended)                          ║"
   color "$RED" "║                                                                              ║"
   color "$RED" "║  ${BOLD}NEVER use classic tokens or tokens with broad repository access!${NC}${RED}          ║"
@@ -198,7 +208,7 @@ create_sandbox() {
   echo ""
 
   # Start the container
-  color "$BLUE" "[1/7] Starting Ubuntu container..."
+  color "$BLUE" "[1/8] Starting Ubuntu container..."
   docker run \
     --name "$container_name" \
     --detach \
@@ -209,12 +219,12 @@ create_sandbox() {
   color "$GREEN" "  ✓ Container started"
 
   # Set permissions for tmp directories
-  color "$BLUE" "[2/7] Setting up permissions..."
+  color "$BLUE" "[2/8] Setting up permissions..."
   docker exec "$container_name" bash -c "chmod a+rwx /tmp /var/tmp 2>/dev/null || true"
   color "$GREEN" "  ✓ Permissions configured"
 
   # Install packages
-  color "$BLUE" "[3/7] Installing packages (this may take a minute)..."
+  color "$BLUE" "[3/8] Installing packages (this may take a minute)..."
   docker exec "$container_name" bash -c "
     apt-get update -qq && \
     apt-get install -y -qq ca-certificates curl git gh sudo > /dev/null 2>&1 && \
@@ -223,7 +233,7 @@ create_sandbox() {
   color "$GREEN" "  ✓ Packages installed"
 
   # Create user with explicit home directory (not the shared mount)
-  color "$BLUE" "[4/7] Creating user..."
+  color "$BLUE" "[4/8] Creating user..."
   docker exec "$container_name" bash -c "
     useradd -m -d /home/$username $username --password password --shell /bin/bash && \
     echo '$username ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
@@ -231,19 +241,19 @@ create_sandbox() {
   color "$GREEN" "  ✓ User created"
 
   # Set ownership of project directory
-  color "$BLUE" "[5/7] Configuring project directory..."
+  color "$BLUE" "[5/8] Configuring project directory..."
   docker exec "$container_name" bash -c "chown -R '$username:$username' /opt/project 2>/dev/null || true"
   color "$GREEN" "  ✓ Project directory configured"
 
   # Install Claude Code
-  color "$BLUE" "[6/7] Installing Claude Code..."
+  color "$BLUE" "[6/8] Installing Claude Code..."
   docker exec -u "$username" "$container_name" bash -c "
     curl -fsSL https://claude.ai/install.sh | bash > /dev/null 2>&1
   " || { color "$RED" "Error: Failed to install Claude Code"; exit 1; }
   color "$GREEN" "  ✓ Claude Code installed"
 
   # Configure environment
-  color "$BLUE" "[7/7] Configuring environment..."
+  color "$BLUE" "[7/8] Configuring environment..."
 
   # Get current user's git config from host
   local git_name git_email
@@ -265,6 +275,56 @@ create_sandbox() {
   " || { color "$RED" "Error: Failed to authenticate gh CLI"; exit 1; }
 
   color "$GREEN" "  ✓ Environment configured"
+
+  # Bootstrap SSH commit signing: generate key, register with GitHub, enable signing.
+  # Commits made inside the sandbox will then be shown as "Verified" on GitHub.
+  color "$BLUE" "[8/8] Bootstrapping verified commit signing..."
+
+  local key_title="claude-sandbox-${project}-$(date +%Y%m%d)"
+
+  # Generate an ed25519 keypair (no passphrase) and capture the pubkey.
+  local pubkey
+  pubkey=$(docker exec -u "$username" "$container_name" bash -c "
+    set -e
+    mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    if [ ! -f ~/.ssh/signing_key ]; then
+      ssh-keygen -t ed25519 -C 'claude-sandbox' -f ~/.ssh/signing_key -N '' -q
+    fi
+    cat ~/.ssh/signing_key.pub
+  ") || { color "$RED" "Error: Failed to generate signing key"; exit 1; }
+
+  # Register pubkey with GitHub (idempotent — skip if an identical key is already present).
+  local register_output
+  register_output=$(docker exec -u "$username" "$container_name" bash -c "
+    set -e
+    existing=\$(gh api /user/ssh_signing_keys --jq '.[].key' 2>/dev/null || true)
+    pubkey=\$(cat ~/.ssh/signing_key.pub)
+    pubkey_body=\$(echo \"\$pubkey\" | awk '{print \$1\" \"\$2}')
+    if echo \"\$existing\" | grep -qF \"\$pubkey_body\"; then
+      echo 'skipped: signing key already registered on GitHub account'
+    else
+      gh api -X POST /user/ssh_signing_keys \
+        -f title='$key_title' \
+        -f key=\"\$pubkey\" \
+        --jq '\"registered: \" + .title' 2>&1
+    fi
+  ") || {
+    color "$RED" "Error: Failed to register signing key with GitHub."
+    color "$RED" "       Ensure the token has 'Account → Git SSH signing keys: Read and write'."
+    exit 1
+  }
+
+  # Configure git to sign every commit and tag with this key.
+  docker exec -u "$username" "$container_name" bash -c "
+    git config --global gpg.format ssh
+    git config --global user.signingkey ~/.ssh/signing_key.pub
+    git config --global commit.gpgsign true
+    git config --global tag.gpgsign true
+  " || { color "$RED" "Error: Failed to configure git signing"; exit 1; }
+
+  color "$GREEN" "  ✓ Commit signing enabled ($register_output)"
+  color "$YELLOW" "  Note: commits must use an email verified on the GitHub account"
+  color "$YELLOW" "        that owns the token. Currently set to: $git_email"
 
   echo ""
   color "$GREEN" "════════════════════════════════════════════════════════════════════"
