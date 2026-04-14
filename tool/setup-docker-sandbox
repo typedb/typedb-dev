@@ -16,9 +16,9 @@ NC='\033[0m'
 
 color() {
   if [ -t 1 ]; then
-    echo -e "$1$2${NC}"
+    printf '%b%s%b\n' "$1" "$2" "$NC"
   else
-    echo "$2"
+    printf '%s\n' "$2"
   fi
 }
 
@@ -67,7 +67,7 @@ Required fine-grained token permissions:
 EOF
 }
 
-TOKEN_URL="https://github.com/settings/personal-access-tokens/new?name=claude-sandbox-token&description=Claude%20Code%20sandbox%20token&expires=30&contents=write"
+TOKEN_URL="https://github.com/settings/personal-access-tokens/new?name=claude-sandbox-token&description=Claude%20Code%20sandbox%20token&expires=30&contents=write&pull_requests=write&user_ssh_signing_keys=write"
 
 show_token_link() {
   echo ""
@@ -235,7 +235,7 @@ create_sandbox() {
   # Create user with explicit home directory (not the shared mount)
   color "$BLUE" "[4/8] Creating user..."
   docker exec "$container_name" bash -c "
-    useradd -m -d /home/$username $username --password password --shell /bin/bash && \
+    useradd -m -d /home/$username $username --shell /bin/bash && \
     echo '$username ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
   " || { color "$RED" "Error: Failed to create user"; exit 1; }
   color "$GREEN" "  ✓ User created"
@@ -255,69 +255,106 @@ create_sandbox() {
   # Configure environment
   color "$BLUE" "[7/8] Configuring environment..."
 
-  # Get current user's git config from host
+  # Inherit host git identity. Either field is intentionally left unset if the
+  # host has no global value — git will then error on the first commit rather
+  # than silently producing commits under a bogus name or unverifiable email.
   local git_name git_email
-  git_name=$(git config --get user.name 2>/dev/null || echo "$username")
-  git_email=$(git config --get user.email 2>/dev/null || echo "$username@sandbox.local")
+  git_name=$(git config --get user.name 2>/dev/null || echo "")
+  git_email=$(git config --get user.email 2>/dev/null || echo "")
 
   docker exec -u "$username" "$container_name" bash -c "
     echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc
-
-    # Configure git
     git config --global --add safe.directory /opt/project
-    git config --global user.name '$git_name'
-    git config --global user.email '$git_email'
   " || { color "$RED" "Error: Failed to configure environment"; exit 1; }
 
-  # Authenticate gh CLI
-  docker exec -u "$username" "$container_name" bash -c "
-    echo '$github_token' | gh auth login --with-token --git-protocol https
-  " || { color "$RED" "Error: Failed to authenticate gh CLI"; exit 1; }
+  if [ -n "$git_name" ]; then
+    docker exec -u "$username" "$container_name" \
+      git config --global user.name "$git_name" \
+      || { color "$RED" "Error: Failed to configure git name"; exit 1; }
+  else
+    color "$YELLOW" "  ! Host has no global user.name — leaving unset inside sandbox."
+    color "$YELLOW" "    Set it before committing: git config --global user.name <name>"
+  fi
+
+  if [ -n "$git_email" ]; then
+    docker exec -u "$username" "$container_name" \
+      git config --global user.email "$git_email" \
+      || { color "$RED" "Error: Failed to configure git email"; exit 1; }
+  else
+    color "$YELLOW" "  ! Host has no global user.email — leaving unset inside sandbox."
+    color "$YELLOW" "    Set it before committing: git config --global user.email <verified-email>"
+  fi
+
+  # Authenticate gh CLI and wire it up as git's credential helper so
+  # `git push` over HTTPS picks up the token automatically. The token is
+  # piped via stdin (not embedded in argv) to keep it out of the container's
+  # /proc/*/cmdline and `docker top` output.
+  docker exec -i -u "$username" "$container_name" bash -c '
+    gh auth login --with-token --git-protocol https && gh auth setup-git
+  ' <<< "$github_token" \
+    || { color "$RED" "Error: Failed to authenticate gh CLI"; exit 1; }
 
   color "$GREEN" "  ✓ Environment configured"
 
-  # Bootstrap SSH commit signing: generate key, register with GitHub, enable signing.
-  # Commits made inside the sandbox will then be shown as "Verified" on GitHub.
+  # Bootstrap SSH commit signing: one static host-level keypair is shared by
+  # every sandbox on this machine, so we don't accumulate per-sandbox keys on
+  # the GitHub account. Generated on first use, reused thereafter, copied into
+  # each container at provision time, and registered once with GitHub.
   color "$BLUE" "[8/8] Bootstrapping verified commit signing..."
 
-  local key_title="claude-sandbox-${project}-$(date +%Y%m%d)"
+  local host_key_dir="$HOME/.config/claude-sandbox"
+  local host_key="$host_key_dir/signing_key"
+  local key_title="claude-sandbox-signing-key"
 
-  # Generate an ed25519 keypair (no passphrase) and capture the pubkey.
-  local pubkey
-  pubkey=$(docker exec -u "$username" "$container_name" bash -c "
-    set -e
-    mkdir -p ~/.ssh && chmod 700 ~/.ssh
-    if [ ! -f ~/.ssh/signing_key ]; then
-      ssh-keygen -t ed25519 -C 'claude-sandbox' -f ~/.ssh/signing_key -N '' -q
-    fi
-    cat ~/.ssh/signing_key.pub
-  ") || { color "$RED" "Error: Failed to generate signing key"; exit 1; }
+  mkdir -p "$host_key_dir"
+  chmod 700 "$host_key_dir"
+  if [ ! -f "$host_key" ]; then
+    ssh-keygen -t ed25519 -C 'claude-sandbox' -f "$host_key" -N '' -q \
+      || { color "$RED" "Error: Failed to generate host signing key at $host_key"; exit 1; }
+    color "$GREEN" "  ✓ Generated new host signing key at $host_key"
+  else
+    color "$GREEN" "  ✓ Reusing existing host signing key at $host_key"
+  fi
 
-  # Register pubkey with GitHub (idempotent — skip if an identical key is already present).
+  # Copy key into the container and hand it to the sandbox user.
+  docker exec -u "$username" "$container_name" mkdir -p "/home/$username/.ssh" \
+    || { color "$RED" "Error: Failed to create .ssh dir"; exit 1; }
+  docker cp "$host_key" "$container_name:/home/$username/.ssh/signing_key"
+  docker cp "$host_key.pub" "$container_name:/home/$username/.ssh/signing_key.pub"
+  docker exec "$container_name" bash -c "
+    chown -R '$username:$username' /home/$username/.ssh && \
+    chmod 700 /home/$username/.ssh && \
+    chmod 600 /home/$username/.ssh/signing_key && \
+    chmod 644 /home/$username/.ssh/signing_key.pub
+  " || { color "$RED" "Error: Failed to install signing key in container"; exit 1; }
+
+  # Register pubkey with GitHub (idempotent — skip if this exact key is already there).
+  local pubkey_body
+  pubkey_body=$(awk '{print $1" "$2}' "$host_key.pub")
   local register_output
-  register_output=$(docker exec -u "$username" "$container_name" bash -c "
-    set -e
-    existing=\$(gh api /user/ssh_signing_keys --jq '.[].key' 2>/dev/null || true)
-    pubkey=\$(cat ~/.ssh/signing_key.pub)
-    pubkey_body=\$(echo \"\$pubkey\" | awk '{print \$1\" \"\$2}')
-    if echo \"\$existing\" | grep -qF \"\$pubkey_body\"; then
-      echo 'skipped: signing key already registered on GitHub account'
-    else
+  register_output=$(docker exec -u "$username" "$container_name" \
+    bash -c "gh api /user/ssh_signing_keys --jq '.[].key' 2>/dev/null || true") \
+    || { color "$RED" "Error: Failed to list existing signing keys"; exit 1; }
+
+  if printf '%s\n' "$register_output" | grep -qFx "$pubkey_body"; then
+    register_output="skipped: signing key already registered on GitHub account"
+  else
+    register_output=$(docker exec -u "$username" "$container_name" \
       gh api -X POST /user/ssh_signing_keys \
-        -f title='$key_title' \
-        -f key=\"\$pubkey\" \
-        --jq '\"registered: \" + .title' 2>&1
-    fi
-  ") || {
-    color "$RED" "Error: Failed to register signing key with GitHub."
-    color "$RED" "       Ensure the token has 'Account → Git SSH signing keys: Read and write'."
-    exit 1
-  }
+        -f "title=$key_title" \
+        -f "key=$pubkey_body" \
+        --jq '"registered: " + .title' 2>&1) || {
+      color "$RED" "Error: Failed to register signing key with GitHub."
+      color "$RED" "       Ensure the token has 'Account → Git SSH signing keys: Read and write'."
+      color "$RED" "       Response: $register_output"
+      exit 1
+    }
+  fi
 
   # Configure git to sign every commit and tag with this key.
   docker exec -u "$username" "$container_name" bash -c "
     git config --global gpg.format ssh
-    git config --global user.signingkey ~/.ssh/signing_key.pub
+    git config --global user.signingkey /home/$username/.ssh/signing_key.pub
     git config --global commit.gpgsign true
     git config --global tag.gpgsign true
   " || { color "$RED" "Error: Failed to configure git signing"; exit 1; }
