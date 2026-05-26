@@ -136,6 +136,13 @@ tool/repo reset typedb typeql
 
 **Note:** The `commit` command only commits to submodule repositories on the specified feature branch. The meta-repository (`typedb-dev`) should be committed manually to avoid accidental submodule pointer updates.
 
+## Local Metrics Stack
+
+`tool/grafana/start` boots a self-contained Prometheus + Grafana stack pointed at a TypeDB server's
+`/diagnostics` endpoint (default `127.0.0.1:4104`), with a pre-provisioned starter dashboard.
+Binaries are downloaded on first run into `tool/grafana/bin/` (gitignored). See
+`tool/grafana/README.md`.
+
 ## Slash Commands
 
 Custom Claude Code commands available in this repository (invoke with `/command-name`):
@@ -280,6 +287,7 @@ Each repository should specify its base branch in its `CLAUDE.md` file. If a rep
 |------------|-------------|
 | Most repos | `master` |
 | `typedb-docs` | `3.x-development` |
+| `typedb-benchmark` | `development` |
 
 ### Merge Strategy
 

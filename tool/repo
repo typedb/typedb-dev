@@ -23,6 +23,7 @@ ALL_REPOS=(
   dependencies
   bazel-distribution
   typedb-behaviour
+  typedb-benchmark
   typedb-docs
   typedb-examples
   typedb-web
@@ -104,9 +105,10 @@ get_modified_count() {
 # Get base branch for a repo from its CLAUDE.md, or return default
 get_base_branch() {
   local repo="$1"
-  local claude_md="$REPOS_DIR/$repo/CLAUDE.md"
-  local base_branch="master"
+  local repo_path="$REPOS_DIR/$repo"
+  local claude_md="$repo_path/CLAUDE.md"
 
+  # 1. CLAUDE.md is authoritative if it specifies one.
   if [ -f "$claude_md" ]; then
     # Look for "Base branch:" pattern in CLAUDE.md (handles markdown formatting like **bold** and `backticks`)
     local line
@@ -120,12 +122,23 @@ get_base_branch() {
         found_branch=$(echo "$line" | sed 's/.*://' | tr -d '[:space:]' | head -1)
       fi
       if [ -n "$found_branch" ]; then
-        base_branch="$found_branch"
+        echo "$found_branch"
+        return
       fi
     fi
   fi
 
-  echo "$base_branch"
+  # 2. Otherwise, use the remote's HEAD pointer (set when the submodule is cloned).
+  #    This avoids hardcoding "master" for repos whose default branch is different.
+  local remote_head
+  remote_head=$(git -C "$repo_path" symbolic-ref --short "refs/remotes/$REMOTE_NAME/HEAD" 2>/dev/null)
+  if [ -n "$remote_head" ]; then
+    echo "${remote_head#$REMOTE_NAME/}"
+    return
+  fi
+
+  # 3. Final fallback.
+  echo "master"
 }
 
 # Get GitHub username
@@ -772,7 +785,7 @@ cmd_list() {
   echo "  typedb-cluster typedb-cloud typedb-cloud-infrastructure"
   echo ""
   echo "Secondary Repositories:"
-  echo "  dependencies bazel-distribution typedb-behaviour typedb-docs typedb-examples typedb-web"
+  echo "  dependencies bazel-distribution typedb-behaviour typedb-benchmark typedb-docs typedb-examples typedb-web"
 }
 
 # Show help

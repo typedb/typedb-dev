@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+#
+# start — boot a local Prometheus + Grafana stack for TypeDB metrics.
+#
+# Spawns Prometheus in the background (scraping TypeDB's /diagnostics
+# endpoint) and runs Grafana in the foreground. Grafana is pre-provisioned
+# with a Prometheus datasource and a starter TypeDB dashboard.
+#
+# On first run, downloads pinned releases of both binaries for this host's
+# OS/CPU into ./prometheus/ and ./grafana/ next to this script. Subsequent
+# runs reuse them.
+#
+# Process supervision: Grafana runs as a child (not exec'd) so the trap
+# fires on exit / Ctrl-C and tears down Prometheus too. `wait $GRAFANA_PID`
+# is used so signals propagate from this shell into Grafana.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BIN="${HERE}/bin"
+
+PROM_VERSION="3.4.0"
+GRAF_VERSION="12.2.0"
+
+# Pick the right release tarballs for this OS+CPU.
+# Prometheus publishes  {linux,darwin}-{amd64,arm64}.
+# Grafana publishes     {linux,darwin}-{amd64,arm64} (same strings, happily).
+case "$(uname -s)" in
+    Linux)  OS="linux" ;;
+    Darwin) OS="darwin" ;;
+    *)      echo "error: unsupported OS $(uname -s)" >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+    aarch64|arm64) CPU="arm64" ;;
+    x86_64|amd64)  CPU="amd64" ;;
+    *)             echo "error: unsupported CPU $(uname -m)" >&2; exit 1 ;;
+esac
+ARCH="${OS}-${CPU}"
+
+PROM_TARBALL="prometheus-${PROM_VERSION}.${ARCH}.tar.gz"
+PROM_URL="https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/${PROM_TARBALL}"
+PROM_ROOT="${BIN}/prometheus"
+PROM_DIR="${PROM_ROOT}/prometheus-${PROM_VERSION}"
+PROM_BIN="${PROM_DIR}/prometheus"
+
+GRAF_TARBALL="grafana-${GRAF_VERSION}.${ARCH}.tar.gz"
+GRAF_URL="https://dl.grafana.com/oss/release/${GRAF_TARBALL}"
+GRAF_ROOT="${BIN}/grafana"
+GRAF_DIR="${GRAF_ROOT}/grafana-v${GRAF_VERSION}"
+GRAF_BIN="${GRAF_DIR}/bin/grafana"
+
+# Defaults
+TARGET="127.0.0.1:4104"
+PROM_PORT="9090"
+GRAF_PORT="3000"
+DATA_DIR="${BIN}/data"
+CONFIG="${HERE}/prometheus.yml"
+
+usage() {
+    cat <<EOF
+Usage: start [OPTIONS]
+
+Boots a self-contained Prometheus + Grafana stack pointed at TypeDB's
+/diagnostics endpoint. Grafana is pre-provisioned with a Prometheus
+datasource and a starter TypeDB dashboard.
+
+On first run, downloads Prometheus ${PROM_VERSION} and Grafana ${GRAF_VERSION}
+for ${ARCH} (~250 MB total). Subsequent runs reuse the install.
+
+Options:
+  --target HOST:PORT     TypeDB diagnostics endpoint to scrape (default: ${TARGET})
+  --prom-port PORT       Internal Prometheus port, loopback only (default: ${PROM_PORT})
+  --grafana-port PORT    Grafana port, loopback only (default: ${GRAF_PORT})
+  --data-dir DIR         TSDB + Grafana DB live here (default: ./bin/data)
+  -h, --help             Show this help and exit
+
+Examples:
+  start
+  start --target 127.0.0.1:4104
+  start --target some-host:4104 --grafana-port 3001
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --target=*)        TARGET="${1#*=}"; shift ;;
+        --target)          TARGET="${2:?--target requires a value}"; shift 2 ;;
+        --prom-port=*)     PROM_PORT="${1#*=}"; shift ;;
+        --prom-port)       PROM_PORT="${2:?--prom-port requires a value}"; shift 2 ;;
+        --grafana-port=*)  GRAF_PORT="${1#*=}"; shift ;;
+        --grafana-port)    GRAF_PORT="${2:?--grafana-port requires a value}"; shift 2 ;;
+        --data-dir=*)      DATA_DIR="${1#*=}"; shift ;;
+        --data-dir)        DATA_DIR="${2:?--data-dir requires a value}"; shift 2 ;;
+        -h|--help)         usage; exit 0 ;;
+        *)                 echo "error: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+    esac
+done
+
+# ---- install helpers ----------------------------------------------------
+#
+# Each helper stages the extracted tarball into a sibling directory and
+# atomically renames it into place. An interrupted run leaves either no
+# install dir or a complete one — never a half-copied binary.
+
+fetch() {
+    local url="$1" dest="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fSL -o "${dest}" "${url}"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -O "${dest}" "${url}"
+    else
+        echo "error: need curl or wget to download releases" >&2
+        return 1
+    fi
+}
+
+install_prometheus() {
+    local tmpdir staging extracted topdir
+    tmpdir="$(mktemp -d)"
+    staging="${PROM_DIR}.partial.$$"
+    trap 'rm -rf "${tmpdir}" "${staging}"' RETURN
+
+    echo "Prometheus binary not found at ${PROM_BIN} — downloading ${PROM_VERSION}..."
+    fetch "${PROM_URL}" "${tmpdir}/${PROM_TARBALL}"
+
+    # Derive the actual top-level dir from the tarball listing rather than
+    # guessing its name — release naming conventions vary across OS/arch.
+    topdir="$(tar -tzf "${tmpdir}/${PROM_TARBALL}" | head -1 | cut -d/ -f1)"
+    [[ -n "${topdir}" ]] || { echo "error: could not determine top-level dir from ${PROM_TARBALL}" >&2; return 1; }
+    tar -xzf "${tmpdir}/${PROM_TARBALL}" -C "${tmpdir}"
+    extracted="${tmpdir}/${topdir}"
+    [[ -d "${extracted}" ]] || { echo "error: extracted dir missing at ${extracted}" >&2; return 1; }
+
+    mkdir -p "${PROM_ROOT}"
+    mv "${extracted}" "${staging}"
+    [[ -x "${staging}/prometheus" ]] || { echo "error: prometheus binary missing from extracted tarball" >&2; return 1; }
+    mv "${staging}" "${PROM_DIR}"
+    echo "Installed prometheus at ${PROM_BIN}"
+}
+
+install_grafana() {
+    local tmpdir staging extracted topdir
+    tmpdir="$(mktemp -d)"
+    staging="${GRAF_DIR}.partial.$$"
+    trap 'rm -rf "${tmpdir}" "${staging}"' RETURN
+
+    echo "Grafana binary not found at ${GRAF_BIN} — downloading ${GRAF_VERSION}..."
+    fetch "${GRAF_URL}" "${tmpdir}/${GRAF_TARBALL}"
+
+    # Derive the actual top-level dir from the tarball listing rather than
+    # guessing its name — Grafana's macOS tarball uses `grafana-X.Y.Z` while
+    # other release channels have used `grafana-vX.Y.Z`.
+    topdir="$(tar -tzf "${tmpdir}/${GRAF_TARBALL}" | head -1 | cut -d/ -f1)"
+    [[ -n "${topdir}" ]] || { echo "error: could not determine top-level dir from ${GRAF_TARBALL}" >&2; return 1; }
+    tar -xzf "${tmpdir}/${GRAF_TARBALL}" -C "${tmpdir}"
+    extracted="${tmpdir}/${topdir}"
+    [[ -d "${extracted}" ]] || { echo "error: extracted dir missing at ${extracted}" >&2; return 1; }
+
+    mkdir -p "${GRAF_ROOT}"
+    mv "${extracted}" "${staging}"
+    [[ -x "${staging}/bin/grafana" ]] || { echo "error: grafana binary missing from extracted tarball" >&2; return 1; }
+    mv "${staging}" "${GRAF_DIR}"
+    echo "Installed grafana at ${GRAF_BIN}"
+}
+
+mkdir -p "${BIN}"
+[[ -x "${PROM_BIN}" ]] || install_prometheus
+[[ -x "${GRAF_BIN}" ]] || install_grafana
+
+# ---- rewrite Prometheus config ------------------------------------------
+#
+# Replace the targets line with whatever --target was passed. We overwrite
+# this on every run; there's no temp file to clean up.
+RUNTIME_PROM_CONFIG="${BIN}/prometheus.runtime.yml"
+if ! sed -E "s|targets:[[:space:]]*\[[^]]*\]|targets: ['${TARGET}']|" "${CONFIG}" > "${RUNTIME_PROM_CONFIG}"; then
+    echo "error: failed to rewrite prometheus config" >&2; exit 1
+fi
+if ! grep -qE "targets:[[:space:]]*\['${TARGET}'\]" "${RUNTIME_PROM_CONFIG}"; then
+    echo "warning: --target '${TARGET}' was not applied — '${CONFIG}' does not contain a recognizable 'targets: [...]' line." >&2
+fi
+
+# ---- rewrite Grafana provisioning ---------------------------------------
+#
+# Grafana provisioning requires absolute paths and the prom-port may
+# have been overridden. We write a fresh copy of the provisioning tree
+# under ${BIN}/runtime-provisioning/ on every run and point Grafana
+# at that, leaving the source tree pristine.
+RUNTIME_PROV="${BIN}/runtime-provisioning"
+rm -rf "${RUNTIME_PROV}"
+# Grafana enumerates every provisioning subdir at startup and logs an ERROR
+# for any that don't exist. Create them all (empty) so the logs stay clean.
+mkdir -p \
+    "${RUNTIME_PROV}/datasources" \
+    "${RUNTIME_PROV}/dashboards" \
+    "${RUNTIME_PROV}/plugins" \
+    "${RUNTIME_PROV}/alerting" \
+    "${RUNTIME_PROV}/notifiers" \
+    "${RUNTIME_PROV}/access-control"
+
+# Datasource: substitute the prom port.
+sed -E "s|http://127\.0\.0\.1:[0-9]+|http://127.0.0.1:${PROM_PORT}|" \
+    "${HERE}/provisioning/datasources/prometheus.yml" \
+    > "${RUNTIME_PROV}/datasources/prometheus.yml"
+
+# Dashboards provider: substitute the absolute path to the dashboards dir.
+DASH_ABS="${RUNTIME_PROV}/dashboards"
+sed -E "s|path:.*|path: ${DASH_ABS}|" \
+    "${HERE}/provisioning/dashboards/dashboards.yml" \
+    > "${RUNTIME_PROV}/dashboards/dashboards.yml"
+
+# Copy the dashboard JSON in alongside the provider yaml.
+cp "${HERE}/provisioning/dashboards/typedb.json" "${RUNTIME_PROV}/dashboards/typedb.json"
+
+# ---- data dirs ----------------------------------------------------------
+PROM_DATA="${DATA_DIR}/prometheus"
+GRAF_DATA="${DATA_DIR}/grafana"
+GRAF_LOGS="${DATA_DIR}/grafana-logs"
+GRAF_PLUGINS="${DATA_DIR}/grafana-plugins"
+mkdir -p "${PROM_DATA}" "${GRAF_DATA}" "${GRAF_LOGS}" "${GRAF_PLUGINS}"
+
+# ---- launch -------------------------------------------------------------
+echo "Starting Prometheus — scraping ${TARGET}/diagnostics on 127.0.0.1:${PROM_PORT}"
+"${PROM_BIN}" \
+    --config.file="${RUNTIME_PROM_CONFIG}" \
+    --storage.tsdb.path="${PROM_DATA}" \
+    --web.listen-address="127.0.0.1:${PROM_PORT}" \
+    --web.enable-lifecycle \
+    >"${DATA_DIR}/prometheus.log" 2>&1 &
+PROM_PID=$!
+
+# Clean up Prometheus when this script exits, regardless of how.
+trap 'kill ${PROM_PID} 2>/dev/null || true; wait ${PROM_PID} 2>/dev/null || true' EXIT INT TERM
+
+echo "Starting Grafana on 127.0.0.1:${GRAF_PORT}"
+echo "  open http://127.0.0.1:${GRAF_PORT} (no login required — anonymous Admin)"
+echo "  Prometheus UI: http://127.0.0.1:${PROM_PORT}/graph"
+echo "  to scrape a different endpoint, pass --target HOST:PORT"
+
+# Grafana is launched as a child (not exec'd) so the EXIT trap above runs
+# and tears down Prometheus when Grafana exits. `wait $GRAFANA_PID`
+# forwards Ctrl-C from this shell into Grafana.
+# Anonymous Admin + login form disabled: this is a loopback-only local
+# dev tool, no point gating it behind auth.
+"${GRAF_BIN}" server \
+    --homepath="${GRAF_DIR}" \
+    cfg:default.paths.data="${GRAF_DATA}" \
+    cfg:default.paths.logs="${GRAF_LOGS}" \
+    cfg:default.paths.plugins="${GRAF_PLUGINS}" \
+    cfg:default.paths.provisioning="${RUNTIME_PROV}" \
+    cfg:default.server.http_addr="127.0.0.1" \
+    cfg:default.server.http_port="${GRAF_PORT}" \
+    cfg:default.analytics.reporting_enabled="false" \
+    cfg:default.analytics.check_for_updates="false" \
+    cfg:default.auth.anonymous.enabled="true" \
+    cfg:default.auth.anonymous.org_role="Admin" \
+    cfg:default.auth.disable_login_form="true" \
+    cfg:default.auth.disable_signout_menu="true" &
+GRAFANA_PID=$!
+
+wait ${GRAFANA_PID}

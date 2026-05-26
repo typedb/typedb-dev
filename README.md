@@ -48,7 +48,8 @@ tool/repo fetch
 typedb-dev/
 ├── tool/
 │   ├── repo                    # Multi-repo management script
-│   └── setup-docker-sandbox    # Docker sandbox for Claude Code
+│   ├── setup-docker-sandbox    # Docker sandbox for Claude Code
+│   └── grafana/                # Local Prometheus + Grafana for TypeDB metrics
 ├── .claude/
 │   └── commands/               # Custom slash commands
 ├── CLAUDE.md                   # AI agent instructions
@@ -118,6 +119,17 @@ The Docker sandbox:
 - Read/Write Contents and Pull Requests only
 - Short expiration (7-30 days recommended)
 - [Create pre-configured token](https://github.com/settings/personal-access-tokens/new?name=claude-sandbox-token&description=Claude%20Code%20sandbox%20token&expires=30&contents=write)
+
+## Local Metrics Stack
+
+To run a local Prometheus + Grafana against a TypeDB server with the metrics endpoint enabled:
+
+```bash
+tool/grafana/start                          # scrapes 127.0.0.1:4104 by default
+tool/grafana/start --target some-host:4104  # different endpoint
+```
+
+Then open <http://127.0.0.1:3000>. See `tool/grafana/README.md` for details.
 
 ## Dependency Graph
 
