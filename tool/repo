@@ -27,6 +27,7 @@ ALL_REPOS=(
   typedb-docs
   typedb-examples
   typedb-web
+  typedb-skills
 )
 
 # Colors for output
@@ -785,7 +786,7 @@ cmd_list() {
   echo "  typedb-cluster typedb-cloud typedb-cloud-infrastructure"
   echo ""
   echo "Secondary Repositories:"
-  echo "  dependencies bazel-distribution typedb-behaviour typedb-benchmark typedb-docs typedb-examples typedb-web"
+  echo "  dependencies bazel-distribution typedb-behaviour typedb-benchmark typedb-docs typedb-examples typedb-web typedb-skills"
 }
 
 # Show help

@@ -46,3 +46,6 @@
 [submodule "repositories/typedb-benchmark"]
 	path = repositories/typedb-benchmark
 	url = https://github.com/typedb/typedb-benchmark.git
+[submodule "repositories/typedb-skills"]
+	path = repositories/typedb-skills
+	url = https://github.com/typedb/typedb-skills.git

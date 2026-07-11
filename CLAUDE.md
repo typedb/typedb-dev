@@ -208,6 +208,7 @@ The `/review` command performs a comprehensive code review based on TypeDB devel
 | `typedb-docs` | Documentation site |
 | `typedb-examples` | Example projects |
 | `typedb-web` | Website |
+| `typedb-skills` | Skill/reference docs for TypeDB (e.g. TypeQL) |
 
 ## Multi-Repo Feature Workflow
 
