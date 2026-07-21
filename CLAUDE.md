@@ -6,6 +6,51 @@ This repository orchestrates development across all TypeDB repositories using gi
 
 We put a huge emphasis on **architectural correctness**, **cohesion** with other code in the same repository, **readability**, and **correctness**. Always aim for **maximum simplicity**, even if it takes multiple iterations of work, cleanup, and attempts - the first solution typically isn't the best one!
 
+// Architecture
+
+We follow domain-driven design principles, trying to use clearly tied together concepts through the implementation. This avoids the introduction of new terms and mistakes in communication. If a new set of terminology is introduced, it should have a clean and intuitive relationship to other terminologies (eg. a syntax tree turning into intermediate representation when it enters the compilation phase)
+
+Follow code smells where possible:
+- redundant copies
+- unclear ownership structures
+- duplicate methods or closely aligned intent across functions
+- two functions that are called the same thing should do the same thing. Conversely, two functions that do almost the same thing that are named very differently is a code smell.
+- too many function arguments (especially < 5, notably when mostly the same lifetimes and level of complexity) often indicates a missing layer of abstraction or bundling
+
+Code smells are hints at architectural mismatches, inefficiencies, or inelegance. Pulling these threads sometimes can be done as a thought exercise, but often iteratively by attempting to resolve them in the code until a wall is hit.
+
+A compromise in the architectural elegance or efficiency is possible when the cost of resolving a code smell is large. At this point, different approaches should be evaluated and if multiple are viable, they should be presented with their own tradeoffs.
+
+- Visibility rules should be as strict as possible. They convey intent of what is meant to be used externally or internally.
+
+// Understandability and readability
+- Code should be optimized for the future reader's ease of visiting, rather than the writer's convenience. This means the simpler, less intricate, and dumber implementation, the better. The exception is in performance-critical sections and hot loops.
+- Code should generally be self-explanatory, based on local and package naming, and based on usage. Reading a few local lines and callers should suffice to understand the intent of the code.
+- Comments should be applied to explain the _why_ of a counterintuitive implementation or to indicate known code smells that are unresolved
+- Comments can be applied a bit more liberally in tests, in particular to delineate different groups of tests in a file or explaining and motivating results
+
+// performance testing
+- Performance is a background goal (pick appropriate data structures, avoid recomputation, share data where possible) but is only the goal when explicitly asked for
+- When doing optimization, we focus on 'general' usage optimizations, ie. optimizations that are not a tradeoff in some cases, only ones that are approximately better or equal in all cases
+- Performance testing is often misleading when only doing microbenchmarks and local tests without a clearly justifiable reasoning, ideally use a suite of benchmarks
+- Unless using counters or deterministic results, performance numbers based on timings should be executed against optimized compiles
+
+// ## Workflow
+
+- We review work on Github to read the diffs for small work, and check out a local copy to assess larger PRs
+- Unless otherwise instructed, we branch out from the latest default branch of the 'typedb' organization and push it to our own fork
+- When submitting work, we open a pull request from our fork's branch to the default branch of the mainline repository (typically in 'typedb' org)
+
+// PR style
+- Write PR descriptions that aid the reviewer and product consumer, not the investigator
+- Keep the information canonical - the explanation and model should only be presented once in the right place
+- Omit measurements unless the goal of the task is performance or inherently numerically driven
+
+// Multi-repo work
+- When work is split across multiple Bazel-driven repositories , we branch out for each and depend on each other via bazel git dependency to the fork + commit of the corresponding branches.
+- When merging dependent PR's, we should ensure that we rewrite the dependencies back to the dependent repository's mainline org and commit sha
+
+
 ### Guidelines for AI Agents
 
 1. **Read documentation first** - Before starting work in any repository, read the `README.md` and `architecture.md` files to understand the codebase structure and conventions. Update these files if your changes affect the documented architecture or setup.
@@ -209,6 +254,19 @@ The `/review` command performs a comprehensive code review based on TypeDB devel
 | `typedb-examples` | Example projects |
 | `typedb-web` | Website |
 | `typedb-skills` | Skill/reference docs for TypeDB (e.g. TypeQL) |
+
+## Development Flow
+
+The normal flow for a change in a single repository (for changes spanning several repos, see **Multi-Repo Feature Workflow** below — the same steps apply per repo):
+
+1. **Branch from the base** - Fetch `typedb` and branch from `typedb/<base-branch>` (see *Creating Feature Branches*). `tool/repo checkout <feature> <repos...>` does this for you.
+2. **Implement** - Make the change, following the repository's existing patterns.
+3. **Commit** - Commit to the feature branch (`tool/repo commit <feature> "<message>"`, or `git commit` in the repo). Commits are squashed on merge, so keep them focused.
+4. **Push to your fork** - Never push to `typedb` directly. `tool/repo push <fork-remote> <feature>` pushes the branch to your fork and prints the PR link (see *Pushing Changes*).
+5. **Open the PR from your fork** - Open the PR from `<fork>:<feature>` against `typedb/<base-branch>`, using the *PR Description Format*.
+6. **Merge** - Squash, then rebase onto the latest base branch (see *Merge Strategy*).
+
+When done, `tool/repo reset [repos...]` returns repos to their base branch.
 
 ## Multi-Repo Feature Workflow
 
